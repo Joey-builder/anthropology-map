@@ -33,6 +33,8 @@ people.forEach(p => {
   p.sites = (META.sites[p.id] || []).map(a => ({ name: a[0], lon: a[1], lat: a[2] }));
 });
 
+const bornLabel = p => (p.bornApprox ? "约 " : "") + p.born;   // 生年不确定者标“约”
+
 const edges = [];                    // 观点级关系
 stmts.forEach(s => (s.links || []).forEach(l => {
   const t = stmtById.get(l.to);
@@ -80,7 +82,7 @@ const cams = {
   pg: { x: 0, y: 0, s: 3, fitS: 3 },
   mp: { x: 0, y: 0, s: 3, fitS: 3 }
 };
-const cam = () => cams[state.view];
+const cam = () => cams[state.view] || cams.st;
 const P = (wx, wy) => [ (wx - cam().x) * cam().s + W / 2, (wy - cam().y) * cam().s + H / 2 ];
 
 function resize() {
@@ -286,6 +288,7 @@ function worldBounds() {
   return { minX: minX - 4, maxX: maxX + 4, minY, maxY };
 }
 function fitView() {
+  if (state.view === "ix") return;   // 索引视图为 HTML 列表，不需要画布适配
   const b = worldBounds();
   const pad = state.view === "pg" ? { l: 100, r: 100, t: 96, b: 252 }
             : state.view === "mp" ? { l: 120, r: 120, t: 100, b: 252 }
@@ -316,7 +319,7 @@ function centerOn(wx, wy, minScale) {
   c.x = wx + shift; c.y = wy; render();
 }
 
-const VIEW_LABELS = { st: "观点时间线", pt: "人物时间线", pg: "人物图谱", mp: "田野地图" };
+const VIEW_LABELS = { st: "观点时间线", pt: "人物时间线", pg: "人物图谱", mp: "田野地图", ix: "观点索引" };
 
 /* ---------------- 颜色 ---------------- */
 const C = () => state.dark
@@ -339,6 +342,11 @@ function render() {
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = col.bg; ctx.fillRect(0, 0, W, H);
   hits = [];
+  const isIndex = state.view === "ix";
+  document.body.classList.toggle("index-mode", isIndex);
+  indexPanel.hidden = !isIndex;
+  indexPanel.classList.toggle("open", isIndex);
+  if (isIndex) { renderIndex(); updateStats(); updateViewHint(); return; }
   const fs = focusSet();
   if (state.view === "st") renderSentence(col, fs);
   else if (state.view === "pt") renderPeople(col, fs);
@@ -704,6 +712,110 @@ function renderMap(col, fs) {
   });
 }
 
+/* ---------------- 观点索引视图（HTML 列表） ---------------- */
+const indexPanel = document.getElementById("indexPanel");
+
+function indexEntry(p, act) {
+  const chips = [
+    ...p.branches.map(b => `<span class="chip"><span class="legend-dot" style="background:${branchById.get(b).color}"></span>${branchById.get(b).label}</span>`),
+    `<span class="chip">${periodById.get(p.period).label}</span>`,
+    ...(p.tags || []).map(t => `<span class="chip"># ${t}</span>`)
+  ].join("");
+  const rows = act.map(s => {
+    const b = branchById.get(s.branch);
+    const rels = s.rel.map(r => `
+      <div class="ix-rel">
+        <span class="rel-mark ${r.type === "agree" ? "tt-agree" : "tt-disagree"}">${r.type === "agree" ? "继承/同意" : "批评/分歧"}</span>
+        <span><a data-person="${r.other.person.id}">${r.other.person.name}</a> · ${r.note}</span>
+      </div>`).join("");
+    return `<div class="ix-stmt">
+        <div class="ix-stmt-head">
+          <span class="ix-year">${s.year}</span>
+          <span class="ix-branch"><span class="legend-dot" style="background:${b.color}"></span>${b.label}</span>
+          ${s.work ? `<span class="ix-work">${s.work}</span>` : ""}
+          ${s.workEn ? `<span class="ix-work" style="font-style:italic">${s.workEn}</span>` : ""}
+          <button class="ix-jump" data-stmt="${s.id}">定位</button>
+        </div>
+        <div class="ix-text">${s.text}</div>${rels}
+      </div>`;
+  }).join("");
+  return `<section class="ix-person" id="ixp-${p.id}">
+      <div class="ix-head">
+        <span class="ix-name" data-person="${p.id}">${p.name}</span>
+        <span class="ix-en">${p.en}</span>
+        <span class="ix-years">${p.died ? `${bornLabel(p)}—${p.died}` : `${bornLabel(p)}—`}</span>
+        <span class="ix-locate">
+          <button class="ix-jump" data-focus="${p.id}">聚焦</button>
+          <button class="ix-jump" data-zoom="${p.id}">时间线定位</button>
+        </span>
+      </div>
+      <div class="ix-chips">${chips}</div>
+      ${rows}
+    </section>`;
+}
+
+function indexMarkdown(list, count) {
+  const head = `# 人类学思想史 · 观点索引\n\n> ${list.length} 位学者 · ${count} 条观点；由 anthropology-map 导出（view=ix）。\n\n`;
+  return head + list.map(p => {
+    const act = p.stmtList.filter(stmtActive).sort((a, b) => a.year - b.year);
+    const meta = [`${p.en}`, p.died ? `${bornLabel(p)}—${p.died}` : `${bornLabel(p)}—`, p.country,
+                  periodById.get(p.period).label, p.branches.map(b => branchById.get(b).label).join("/")].join(" · ");
+    const rows = act.map(s => {
+      const b = branchById.get(s.branch);
+      const rel = s.rel.map(r => `（${r.type === "agree" ? "继承/同意" : "批评/分歧"}：${r.other.person.name} · ${r.note}）`).join("");
+      return `- **${s.year}** · ${b.label}${s.work ? ` · ${s.work}` : ""}${s.workEn ? ` / *${s.workEn}*` : ""}\n  ${s.text}${rel ? "\n  " + rel : ""}`;
+    }).join("\n");
+    return `## ${p.name}\n\n${meta}\n\n${rows}\n`;
+  }).join("\n");
+}
+
+let indexSig = "";
+function renderIndex() {
+  const list = people.filter(personActive).sort((a, b) => a.born - b.born || a.name.localeCompare(b.name));
+  const count = list.reduce((n, p) => n + p.stmtList.filter(stmtActive).length, 0);
+  const sig = JSON.stringify([[...state.branches].sort(), [...state.periods].sort(), [...state.edges].sort(),
+                              state.basics, qNorm(), list.map(p => p.id + ":" + p.stmtList.filter(stmtActive).length)]);
+  if (sig === indexSig && indexPanel.firstChild) { updateStats(); return; }   // 内容未变则保留滚动位置
+  indexSig = sig;
+  const body = list.length
+    ? list.map(p => indexEntry(p, [...p.stmtList].filter(stmtActive).sort((a, b) => a.year - b.year))).join("")
+    : `<div class="ix-person"><div class="ix-text">当前筛选下没有条目，请调整左下筛选或清空搜索。</div></div>`;
+  indexPanel.innerHTML = `<div class="ix-inner">
+      <div class="ix-title"><span>观点索引</span>
+        <span class="ix-meta">${list.length} 位学者 · ${count} 条观点 · 按生年排序</span>
+        <button class="drawer-btn" id="ixExport">下载 Markdown</button>
+      </div>${body}</div>`;
+  const ex = document.getElementById("ixExport");
+  if (ex) ex.onclick = () => {
+    const md = indexMarkdown(list, count);
+    download("anthropology-statements-index.md", md, "text/markdown;charset=utf-8");
+  };
+  indexPanel.querySelectorAll("[data-person]").forEach(el => el.onclick = () => openPerson(el.dataset.person));
+  indexPanel.querySelectorAll("[data-focus]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    state.focus = { kind: "person", id: el.dataset.focus };
+    state.highlightStmt = null;
+    syncHash(); render(); updateAuxButtons();
+  });
+  indexPanel.querySelectorAll("[data-zoom]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    const p = personById.get(el.dataset.zoom);
+    const first = [...p.stmtList].sort((a, b) => a.year - b.year)[0];
+    state.focus = { kind: "person", id: p.id };
+    state.highlightStmt = first ? first.id : null;
+    setView("st");
+    if (first) zoomToStmt(first);
+  });
+  indexPanel.querySelectorAll(".ix-jump[data-stmt]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    const st = stmtById.get(el.dataset.stmt);
+    state.focus = { kind: "stmt", id: st.id };
+    state.highlightStmt = st.id;
+    setView("st");
+    zoomToStmt(st);
+  });
+}
+
 function updateStats() {
   const n = stmts.filter(stmtActive).length;
   const ps = new Set(stmts.filter(stmtActive).map(s => s.person.id));
@@ -714,7 +826,9 @@ function updateStats() {
 function updateViewHint() {
   const el = document.getElementById("viewHint");
   if (!el) return;
-  el.textContent = state.view === "mp"
+  el.textContent = state.view === "ix"
+    ? "按人物分组的全部观点列表 · 点击“定位”跳到观点时间线 · 顶栏可下载 Markdown"
+    : state.view === "mp"
     ? "实心圆 = 田野点（大小 = 学者数） · 空心圆 = 机构城市 · 曲线 = 从机构所在地到田野点"
     : state.view === "st" ? "曲线 = 观点之间的关系（绿：继承/同意 · 红：批评/分歧）"
     : state.view === "pt" ? "每行一位学者 · 圆点 = 其观点提出的年份"
@@ -824,13 +938,13 @@ function showTooltip(h, x, y) {
       <div class="tt-hint">点击查看以该城市为基地的学者</div>`;
   } else if (h.kind === "arc") {
     const p = h.item;
-    tooltipData = `<div class="tt-head"><span class="tt-name">${p.name}</span><span class="tt-year">${p.born}${p.died ? "–" + p.died : "–"}</span></div>
+    tooltipData = `<div class="tt-head"><span class="tt-name">${p.name}</span><span class="tt-year">${bornLabel(p)}${p.died ? "–" + p.died : "–"}</span></div>
       <div class="tt-work">${p.en}</div>
       <div class="tt-text">田野点：${h.site}</div>
       <div class="tt-hint">点击查看人物详情</div>`;
   } else {
     const p = h.item;
-    const years = p.died ? `${p.born}–${p.died}` : `${p.born}–`;
+    const years = p.died ? `${bornLabel(p)}–${p.died}` : `${bornLabel(p)}–`;
     tooltipData = `<div class="tt-head"><span class="tt-name">${p.name}</span><span class="tt-year">${years}</span></div>
       <div class="tt-work">${p.en}</div>
       <div class="tt-text">${p.stmtList.length} 条观点 · ${p.branches.map(b => branchById.get(b).label).join(" / ")}</div>
@@ -879,7 +993,7 @@ function openPerson(id) {
     ...(p.regions || []).map(r => `<span class="chip">${r}</span>`),
     ...(p.tags || []).map(t => `<span class="chip"># ${t}</span>`)
   ].join("");
-  const years = p.died ? `${p.born}—${p.died}` : `${p.born}—`;
+  const years = p.died ? `${bornLabel(p)}—${p.died}` : `${bornLabel(p)}—`;
   const stmtHtml = [...p.stmtList].sort((a, b) => a.year - b.year).map(s => {
     const active = stmtActive(s);
     const b = branchById.get(s.branch);
@@ -940,7 +1054,7 @@ function openSite(site, kind) {
   const rows = persons.map(p => `
     <div class="dr-stmt">
       <div class="dr-stmt-head">
-        <span class="dr-stmt-year">${p.born}${p.died ? "–" + p.died : "–"}</span>
+        <span class="dr-stmt-year">${bornLabel(p)}${p.died ? "–" + p.died : "–"}</span>
         <span class="dr-stmt-work">${p.country}</span>
         <span class="dr-stmt-branch">${p.branches.map(b => `<span class="legend-dot" style="background:${branchById.get(b).color}"></span>`).join("")}</span>
       </div>
@@ -1047,7 +1161,7 @@ function exportBib() { download("anthropology-references.bib", bibtexOf(people),
 function exportCSV() {
   const rows = [["人物id", "姓名", "原文名", "生", "卒", "国别", "时期", "领域", "观点id", "年份", "领域", "中文题名", "原题", "观点"]];
   people.forEach(p => p.stmtList.forEach(st => rows.push([
-    p.id, p.name, p.en, p.born, p.died || "", p.country, periodById.get(p.period).label,
+    p.id, p.name, p.en, bornLabel(p), p.died || "", p.country, periodById.get(p.period).label,
     p.branches.map(b => branchById.get(b).label).join("/"), st.id, st.year,
     branchById.get(st.branch).label, st.work || "", st.workEn || "", st.text
   ])));
@@ -1056,6 +1170,7 @@ function exportCSV() {
 }
 
 function openAbout() {
+  const _nP = people.length, _nS = stmts.length, _nE = edges.length;
   openDrawer(`
     <div class="dr-about">
       <div class="dr-name">关于这个项目</div>
@@ -1066,7 +1181,8 @@ function openAbout() {
       <p><span class="k">观点时间线</span>：横轴是年份，按领域分行，曲线表示观点之间的关系。<br>
       <span class="k">人物时间线</span>：每位学者一行，圆点是他/她在某一年提出的观点。<br>
       <span class="k">人物图谱</span>：人物按关联强度布局，绿线为继承/同意，红线为批评/分歧。<br>
-      左下筛选可以按领域、时期、关系类型过滤；“入门”只保留最核心的十几位人物。点击任意圆点或节点查看文章与观点详情。</p>
+      <span class="k">观点索引</span>：按人物分组的全部观点列表（含关系说明），可一键“定位”到时间线，并可下载 Markdown 全文。<br>
+      左下筛选可以按领域、时期、关系类型过滤；“入门”只保留最核心的二十位人物。点击任意圆点或节点查看文章与观点详情。</p>
       <div class="dr-section-title">田野地图</div>
       <p><span class="k">圆点</span>是田野点/研究区域，大小代表在此做过研究的学者数；<span class="k">曲线</span>从学者主要任教或研究机构所在地连向田野点，可以直观看到二十世纪人类学的"从大都市到田野"结构。扶手椅学者（如弗雷泽）没有田野点，这一空白本身就是学科史的一部分。</p>
       <div class="dr-section-title">导出与引用</div>
@@ -1078,10 +1194,10 @@ function openAbout() {
       </div>
       <p class="muted">导出内容为编者整理的二次文献信息（作者、年份、题名），正式引用前请核对原书版本与页码。</p>
       <div class="dr-section-title">数据说明</div>
-      <p>本版收录 59 位学者、141 条观点、114 组关系，由编者依据公开学术文献整理与改述，用于学习与浏览。观点年份取该著作/论文的初版年，个别跨年度出版的著作取通行版本年份。</p>
+      <p>本版收录 __N_PEOPLE__ 位学者、__N_STMT__ 条观点、__N_EDGE__ 组关系，由编者依据公开学术文献整理与改述，用于学习与浏览。观点年份取该著作/论文的初版年，个别跨年度出版的著作取通行版本年份。少数生年不易确证者标“约”。</p>
       <div class="dr-section-title">下一步</div>
       <p class="muted">可扩展方向：接入你自己的数据、补充中国人类学史、加入“师承/田野地点”维度、多语言版本、导出引用等。欢迎提出想法。</p>
-    </div>`);
+    </div>`.replace("__N_PEOPLE__", _nP).replace("__N_STMT__", _nS).replace("__N_EDGE__", _nE));
 }
 
 /* ---------------- 筛选药丸与控件 ---------------- */
@@ -1174,6 +1290,7 @@ function setView(v) {
 }
 function iconFor(v) {
   if (v === "st") return `<svg viewBox="0 0 18 14"><line x1="1" y1="4" x2="17" y2="4"/><line x1="1" y1="10" x2="17" y2="10"/><circle cx="6" cy="4" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="10" r="2" fill="currentColor" stroke="none"/></svg>`;
+  if (v === "ix") return `<svg viewBox="0 0 18 14"><circle cx="2.6" cy="2.6" r="1.6" fill="currentColor" stroke="none"/><line x1="6.5" y1="2.6" x2="16.5" y2="2.6"/><circle cx="2.6" cy="7" r="1.6" fill="currentColor" stroke="none"/><line x1="6.5" y1="7" x2="16.5" y2="7"/><circle cx="2.6" cy="11.4" r="1.6" fill="currentColor" stroke="none"/><line x1="6.5" y1="11.4" x2="16.5" y2="11.4"/></svg>`;
   if (v === "mp") return `<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><ellipse cx="9" cy="9" rx="3.2" ry="7"/><line x1="2" y1="9" x2="16" y2="9"/></svg>`;
   if (v === "pt") return `<svg viewBox="0 0 18 14"><line x1="3" y1="2" x2="3" y2="12"/><circle cx="3" cy="4" r="1.7" fill="currentColor" stroke="none"/><circle cx="3" cy="10" r="1.7" fill="currentColor" stroke="none"/><circle cx="13" cy="4" r="1.7" fill="currentColor" stroke="none"/><circle cx="13" cy="10" r="1.7" fill="currentColor" stroke="none"/><path d="M3 4 L13 10"/><path d="M3 10 L13 4"/></svg>`;
   return `<svg viewBox="0 0 18 14"><line x1="4" y1="4" x2="13" y2="10"/><line x1="4" y1="10" x2="13" y2="4"/><circle cx="4" cy="4" r="2" fill="currentColor" stroke="none"/><circle cx="4" cy="10" r="2" fill="currentColor" stroke="none"/><circle cx="14" cy="7" r="2" fill="currentColor" stroke="none"/></svg>`;
@@ -1220,7 +1337,7 @@ function renderSearchResults() {
   const st = stmts.filter(s => [s.text, s.work || ""].join(" ").toLowerCase().includes(q)).slice(0, 8);
   let html = "";
   if (ppl.length) html += `<div class="group-title">人物</div>` + ppl.map(p =>
-    `<div class="result-item" data-kind="person" data-id="${p.id}"><span class="t">${p.name}</span><span class="s">${p.en} · ${p.born}</span></div>`).join("");
+    `<div class="result-item" data-kind="person" data-id="${p.id}"><span class="t">${p.name}</span><span class="s">${p.en} · ${bornLabel(p)}</span></div>`).join("");
   if (st.length) html += `<div class="group-title">观点</div>` + st.map(s =>
     `<div class="result-item" data-kind="stmt" data-id="${s.id}"><span class="t">${s.person.name}</span><span class="s">${s.year} · ${s.text}</span></div>`).join("");
   if (!html) html = `<div class="empty">没有匹配的条目</div>`;
@@ -1242,6 +1359,13 @@ function centerPerson(id) {
   const y = pos.reduce((m, v) => m + v.y, 0) / pos.length;
   centerOn(x, y, cam().fitS * 2.6);
 }
+function zoomToStmt(s) {   // 以“可读但不过分放大”的比例定位到某条观点（供索引视图跳转）
+  const pos = state.view === "st" ? s._st : s._pt;
+  const c = cam();
+  c.s = c.fitS * 1.15;
+  centerOn(pos.x, pos.y);
+}
+
 function centerStmt(s) {
   if (state.view === "pg") { const nd = layout.pg.byId.get(s.person.id); if (nd) centerOn(nd.x, nd.y, cam().fitS * 2.2); return; }
   const pos = state.view === "st" ? s._st : s._pt;
@@ -1271,7 +1395,7 @@ function readHash() {
   if (!h) return;
   const params = new URLSearchParams(h);
   const v = params.get("view");
-  if (v && ["st", "pt", "pg", "mp"].includes(v)) setViewSilent(v);
+  if (v && ["st", "pt", "pg", "mp", "ix"].includes(v)) setViewSilent(v);
   const cats = params.get("cats");
   if (cats) {
     state.branches = new Set(cats.split(",").filter(x => branchById.has(x)));

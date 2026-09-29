@@ -29,7 +29,38 @@ window.ANTHRO_META = {
     lin: [116.41, 39.90], yan: [-118.24, 34.05], childe: [-3.19, 55.95],
     binford: [-106.65, 35.08], hodder: [0.12, 52.21], washburn: [-122.27, 37.87],
     montagu: [-74.66, 40.35], lewontin: [-71.11, 42.37], goodall: [0.12, 52.21],
-    dewaal: [-84.39, 33.75], kleinman: [-71.06, 42.36]
+    dewaal: [-84.39, 33.75], kleinman: [-71.06, 42.36],
+    "ingold": [-2.09, 57.15],
+    "de-la-cadena": [-121.74, 38.54],
+    "kohn": [-73.57, 45.5],
+    "haraway": [-122.03, 36.97],
+    "wagner": [-78.48, 38.03],
+    "rosaldo-r": [-122.17, 37.43],
+    "willis": [-1.9, 52.48],
+    "das": [77.21, 28.61],
+    "fassin": [2.35, 48.86],
+    "herzfeld": [-71.11, 42.37],
+    "gupta": [-118.24, 34.05],
+    "trouillot": [-87.63, 41.88],
+    "newton": [-74.01, 40.71],
+    "stoler": [-74.01, 40.71],
+    "miller-d": [-0.13, 51.51],
+    "boellstorff": [-117.83, 33.68],
+    "coleman": [-73.57, 45.5],
+    "lock": [-73.57, 45.5],
+    "martin-e": [-74.01, 40.71],
+    "luhrmann": [-122.17, 37.43],
+    "farmer": [-71.06, 42.36],
+    "hrdy": [-121.74, 38.54],
+    "paabo": [12.39, 51.34],
+    "leakey-m": [-1.29, 36.82],
+    "cann": [-157.86, 21.31],
+    "flannery": [-83.74, 42.28],
+    "behar": [-83.74, 42.28],
+    "wang-mingming": [116.41, 39.9],
+    "xiang-biao": [-1.26, 51.75],
+    "jing-jun": [116.41, 39.9],
+    "zhuang-kongshao": [120.16, 30.27]
   },
 
   cities: {
@@ -40,6 +71,19 @@ window.ANTHRO_META = {
     "4.90,52.37": "阿姆斯特丹", "-0.34,53.77": "赫尔", "-95.37,29.76": "休斯顿", "-43.17,-22.91": "里约热内卢",
     "149.13,-35.28": "堪培拉", "-118.24,34.05": "洛杉矶", "-3.19,55.95": "爱丁堡", "-106.65,35.08": "阿尔伯克基",
     "-122.27,37.87": "伯克利", "-71.11,42.37": "剑桥（麻省）", "-84.39,33.75": "亚特兰大", "-71.06,42.36": "波士顿"
+  ,
+    "-2.09,57.15": "阿伯丁",
+    "-121.74,38.54": "戴维斯",
+    "-73.57,45.50": "蒙特利尔",
+    "-78.48,38.03": "夏洛茨维尔",
+    "77.21,28.61": "德里",
+    "-1.90,52.48": "伯明翰"
+  ,
+    "-117.83,33.68": "尔湾",
+    "12.39,51.34": "莱比锡",
+    "-1.29,36.82": "内罗毕",
+    "-157.86,21.31": "檀香山",
+    "120.16,30.27": "杭州"
   },
 
   sites: {
@@ -101,7 +145,37 @@ window.ANTHRO_META = {
     lewontin: [],
     goodall: [["贡贝溪（坦桑尼亚）", 29.63, -4.67]],
     dewaal: [["伯格斯动物园（阿纳姆）", 5.9, 51.99], ["耶基斯田野站（亚特兰大）", -84.0, 33.9]],
-    kleinman: [["台北", 121.5, 25.05], ["长沙（湖南医学院）", 113.0, 28.2]]
+    kleinman: [["台北", 121.5, 25.05], ["长沙（湖南医学院）", 113.0, 28.2]],
+    "ingold": [["芬兰北部（萨米地区）", 26.0, 68.0]],
+    "de-la-cadena": [["秘鲁安第斯（库斯科）", -71.97, -13.53]],
+    "kohn": [["厄瓜多尔阿维拉（纳波河）", -77.0, -1.0]],
+    "wagner": [["巴布亚新几内亚（达里比）", 143.5, -6.3]],
+    "rosaldo-r": [["菲律宾吕宋（伊隆戈）", 121.3, 16.5]],
+    "willis": [["英国汉默镇（工业区）", -1.9, 52.48]],
+    "das": [["印度德里", 77.21, 28.61], ["旁遮普（分治记忆）", 75.0, 31.0]],
+    "fassin": [["法国（城市执法）", 2.35, 48.86], ["南非（艾滋病政策）", 28.05, -26.2]],
+    "herzfeld": [["希腊克里特（雷西姆农）", 24.47, 35.37], ["曼谷", 100.5, 13.75]],
+    "gupta": [["印度北部（官僚与贫困）", 80.0, 26.5]],
+    "trouillot": [["海地", -72.34, 18.54]],
+    "newton": [["美国（纽约、火岛樱桃林）", -73.0, 40.75]],
+    "stoler": [["印尼（苏门答腊种植园）", 101.0, 0.5]],
+    "miller-d": [["特立尼达", -61.5, 10.5], ["伦敦（数字与物质文化）", -0.13, 51.51], ["印度（消费研究）", 77.21, 28.61]],
+    "boellstorff": [["印尼", 106.85, -6.2], ["虚拟世界（Second Life）", -122.0, 37.0]],
+    "coleman": [["线上（自由软件与 Anonymous）", -74.0, 40.7]],
+    "lock": [["日本（京都）", 135.77, 35.01], ["北美（更年期比较研究）", -73.57, 45.5]],
+    "martin-e": [["美国（更年期与免疫研究）", -76.61, 39.29]],
+    "luhrmann": [["美国（福音派教会）", -87.63, 41.88], ["加纳", -0.19, 5.6], ["印度", 80.27, 13.08]],
+    "farmer": [["海地（中央高原）", -72.0, 19.0], ["卢旺达", 30.06, -1.94], ["秘鲁（卡拉瓦亚）", -73.0, -13.0]],
+    "hrdy": [["印度（阿布山的长尾叶猴）", 72.7, 24.6]],
+    "paabo": [["西伯利亚（丹尼索瓦洞）", 86.0, 51.4]],
+    "leakey-m": [["坦桑尼亚奥杜威峡谷", 35.4, -2.98], ["莱托利", 35.2, -3.0]],
+    "cann": [["实验室（全球人群样本）", -157.86, 21.31]],
+    "flannery": [["近东（扎格罗斯山地）", 48.0, 33.0], ["墨西哥瓦哈卡", -96.7, 17.06]],
+    "behar": [["墨西哥（圣路易斯波托西）", -100.98, 22.15], ["古巴（哈瓦那）", -82.38, 23.13]],
+    "wang-mingming": [["福建溪村", 118.5, 24.9]],
+    "xiang-biao": [["北京“浙江村”", 116.41, 39.9], ["印度（IT 劳工）", 77.21, 28.61]],
+    "jing-jun": [["甘肃大川", 103.5, 36.1]],
+    "zhuang-kongshao": [["福建黄村", 119.0, 26.5]]
   },
 
   works: {
@@ -238,5 +312,289 @@ window.ANTHRO_META = {
     "dewaal-morality": "Good Natured",
     "kleinman-models": "Patients and Healers in the Context of Culture",
     "kleinman-narratives": "The Illness Narratives"
+  ,
+    "levy-strauss-structural-anth": "Anthropologie structurale",
+    "levy-strauss-totemism": "Le Totémisme aujourd'hui"
+  ,
+    "bastian-vokergedanken": "Grundzüge der Ethnologie",
+    "bastian-diffusion": "Die Völker des östlichen Asien"
+  ,
+    "tylor-early-history": "Researches into the Early History of Mankind",
+    "tylor-adhesion": "On a Method of Investigating the Development of Institutions"
+  ,
+    "morgan-house": "Houses and House-Life of the American Aborigines",
+    "morgan-civitas": "Ancient Society"
+  ,
+    "frazer-totemism": "Totemism",
+    "frazer-magic-religion": "The Golden Bough (3rd ed.)"
+  ,
+    "boas-immigrant-headform": "Changes in Bodily Form of Descendants of Immigrants",
+    "boas-kwakiutl": "The Social Organization of the Kwakiutl"
+  ,
+    "durkheim-division": "De la division du travail social",
+    "durkheim-suicide": "Le Suicide"
+  ,
+    "mauss-person": "Une catégorie de l'esprit humain : la notion de personne",
+    "mauss-eskimo": "Essai sur les variations saisonnières des sociétés Eskimos"
+  ,
+    "malinowski-magic": "Magic, Science and Religion",
+    "malinowski-sex-family": "The Sexual Life of Savages"
+  ,
+    "radcliffe-brown-socialstructure": "On Social Structure",
+    "radcliffe-brown-totemism": "The Sociological Theory of Totemism"
+  ,
+    "sapir-environment": "Language and Environment",
+    "sapir-status": "The Status of Linguistics as a Science"
+  ,
+    "mead-newguinea": "Growing Up in New Guinea",
+    "mead-male-female": "Male and Female"
+  ,
+    "benedict-race": "Race: Science and Politics",
+    "benedict-zuni": "Zuni Mythology"
+  ,
+    "whorf-hopi-time": "An American Indian Model of the Universe",
+    "whorf-cryptotypes": "Grammatical Categories"
+  ,
+    "ep-nuer-time": "The Nuer",
+    "ep-sanusi": "The Sanusi of Cyrenaica",
+    "ep-nuer-religion": "Nuer Religion"
+  ,
+    "firth-organization": "Elements of Social Organization",
+    "firth-ritual": "Tikopia Ritual and Belief"
+  ,
+    "fortes-descent": "The Structure of Unilineal Descent Groups",
+    "fortes-ancestors": "Oedipus and Job in West African Religion"
+  ,
+    "bateson-double-bind": "Toward a Theory of Schizophrenia",
+    "bateson-mind-nature": "Mind and Nature: A Necessary Unity"
+  ,
+    "leach-pul-eliya": "Pul Eliya: A Village in Ceylon",
+    "leach-genesis": "Genesis as Myth"
+  ,
+    "gluckman-situational": "Analysis of a Social Situation in Modern Zululand",
+    "gluckman-conflict": "Order and Rebellion in Tribal Africa"
+  ,
+    "turner-social-drama": "Dramas, Fields, and Metaphors",
+    "turner-pilgrimage": "Image and Pilgrimage in Christian Culture"
+  ,
+    "douglas-risk": "Risk and Culture",
+    "douglas-institutions": "How Institutions Think"
+  ,
+    "geertz-local-knowledge": "Local Knowledge",
+    "geertz-works-lives": "Works and Lives: The Anthropologist as Author"
+  ,
+    "dumont-individualism": "Essais sur l'individualisme"
+  ,
+    "sahlins-historical-metaphors": "Historical Metaphors and Mythical Realities",
+    "sahlins-kinship": "What Kinship Is — And Is Not"
+  ,
+    "wolf-peasant-wars": "Peasant Wars of the Twentieth Century",
+    "wolf-envisioning": "Envisioning Power"
+  ,
+    "mintz-caribbean": "Caribbean Transformations",
+    "mintz-afro-american": "An Anthropological Approach to the Afro-American Past"
+  ,
+    "harris-sacred-cattle": "The Cultural Ecology of India's Sacred Cattle",
+    "harris-cannibals": "Cannibals and Kings"
+  ,
+    "schneider-blood-law": "American Kinship: A Cultural Account"
+  ,
+    "bourdieu-reproduction": "La Reproduction",
+    "bourdieu-sense": "Le Sens pratique",
+    "bourdieu-masculine": "La Domination masculine"
+  ,
+    "rubin-charmed-circle": "Thinking Sex",
+    "rubin-deviations": "Deviations: A Gayle Rubin Reader"
+  ,
+    "ortner-sherpas": "Sherpas through their Rituals",
+    "ortner-everest": "Life and Death on Mt. Everest",
+    "ortner-subjectivity": "Subjectivity and Cultural Critique"
+  ,
+    "rosaldo-woman-culture": "Woman, Culture, and Society",
+    "rosaldo-self": "Toward an Anthropology of Self and Feeling"
+  ,
+    "taussig-shamanism": "Shamanism, Colonialism, and the Wild Man",
+    "taussig-defacement": "Defacement"
+  ,
+    "fabian-denial": "Time and the Other",
+    "fabian-language": "Language and Colonial Power"
+  ,
+    "asad-islam": "The Idea of an Anthropology of Islam",
+    "asad-secular": "Formations of the Secular"
+  ,
+    "clifford-salvage": "Of Other Peoples: Beyond the Salvage Paradigm",
+    "clifford-routes": "Routes: Travel and Translation in the Late Twentieth Century"
+  ,
+    "marcus-cultural-critique": "Anthropology as Cultural Critique",
+    "marcus-contemporary": "Designs for an Anthropology of the Contemporary"
+  ,
+    "appadurai-aspiration": "The Capacity to Aspire",
+    "appadurai-future": "The Future as Cultural Fact"
+  ,
+    "strathern-women-in-between": "Women in Between",
+    "strathern-audit": "Audit Cultures"
+  ,
+    "descola-spears": "Les lances du crépuscule",
+    "descola-ecology": "L'écologie des autres"
+  ,
+    "viveiros-soul": "A inconstância da alma selvagem"
+  ,
+    "latour-irreductions": "Irréductions",
+    "latour-reassembling": "Reassembling the Social",
+    "latour-gaia": "Face à Gaïa"
+  ,
+    "tsing-diamond-queen": "In the Realm of the Diamond Queen",
+    "tsing-feral-atlas": "Feral Atlas"
+  ,
+    "abu-muslim-women": "Do Muslim Women Need Saving?",
+    "abu-dramas": "Dramas of Nationhood"
+  ,
+    "obeyesekere-medusa": "Medusa's Hair",
+    "obeyesekere-work": "The Work of Culture"
+  ,
+    "freeman-hoaxing": "The Fateful Hoaxing of Margaret Mead"
+  ,
+    "fei-reproduction": "生育制度",
+    "fei-small-town": "小城镇大问题",
+    "fei-cultural-awareness": "反思·对话·文化自觉"
+  ,
+    "lin-ancestors": "Under the Ancestors' Shadow"
+  ,
+    "yan-individualization": "The Individualization of Chinese Society"
+  ,
+    "childe-danube": "The Danube in Prehistory",
+    "childe-urban-revolution": "The Urban Revolution",
+    "childe-social-evolution": "Social Evolution"
+  ,
+    "binford-nunamiut": "Nunamiut Ethnoarchaeology",
+    "binford-bones": "Bones: Ancient Men and Modern Myths"
+  ,
+    "hodder-domestication": "The Domestication of Europe",
+    "hodder-entangled": "Entangled"
+  ,
+    "washburn-hunting": "The Evolution of Hunting"
+  ,
+    "montagu-concept-race": "The Concept of Race",
+    "montagu-touching": "Touching: The Human Significance of the Skin"
+  ,
+    "lewontin-spandrels": "The Spandrels of San Marco",
+    "lewontin-ideology": "Biology as Ideology"
+  ,
+    "goodall-window": "Through a Window",
+    "goodall-hope": "Reason for Hope"
+  ,
+    "dewaal-bonobo": "Bonobo: The Forgotten Ape",
+    "dewaal-empathy": "The Age of Empathy"
+  ,
+    "kleinman-neurasthenia": "Social Origins of Distress and Disease",
+    "kleinman-social-suffering": "Social Suffering",
+    "kleinman-caregiving": "The Soul of Care"
+  ,
+    "ingold-dwelling": "The Perception of the Environment",
+    "ingold-hunters-pastoralists": "Hunters, Pastoralists and Ranchers",
+    "ingold-lines": "Lines: A Brief History",
+    "ingold-making": "Making: Anthropology, Archaeology, Art and Architecture",
+    "cadena-earth-beings": "Earth Beings: Ecologies of Practice across Andean Worlds",
+    "cadena-cosmopolitics": "Indigenous Cosmopolitics in the Andes",
+    "cadena-partial-connections": "Earth Beings: Ecologies of Practice across Andean Worlds",
+    "kohn-dogs": "How Dogs Dream: Amazonian Natures and the Politics of Transspecies Engagement",
+    "kohn-forest": "How Forests Think: Toward an Anthropology beyond the Human",
+    "haraway-cyborg": "A Cyborg Manifesto",
+    "haraway-situated": "Situated Knowledges",
+    "haraway-companion": "The Companion Species Manifesto",
+    "haraway-staying": "Staying with the Trouble",
+    "wagner-daribi": "Habu: The Innovation of Meaning in Daribi Religion",
+    "wagner-invention": "The Invention of Culture",
+    "wagner-symbols": "Symbols that Stand for Themselves",
+    "rosaldo-r-ilongot": "Ilongot Headhunting, 1883-1974",
+    "rosaldo-r-grief": "Grief and a Headhunter's Rage",
+    "rosaldo-r-culture-truth": "Culture and Truth",
+    "willis-learning": "Learning to Labour",
+    "willis-ethnographic-imagination": "The Ethnographic Imagination",
+    "das-critical-events": "Critical Events",
+    "das-violence": "Life and Words",
+    "das-violence-subjectivity": "Violence and Subjectivity",
+    "fassin-trauma": "L'Empire du traumatisme",
+    "fassin-police": "La Force de l'ordre",
+    "fassin-moral": "A Companion to Moral Anthropology",
+    "herzfeld-poetics": "The Poetics of Manhood",
+    "herzfeld-indifference": "The Social Production of Indifference",
+    "herzfeld-intimacy": "Cultural Intimacy",
+    "gupta-state": "Blurred Boundaries",
+    "gupta-anthropology-of-state": "Anthropology of the State: A Reader",
+    "gupta-red-tape": "Red Tape",
+    "trouillot-haiti": "Haiti: State Against Nation",
+    "trouillot-silencing": "Silencing the Past",
+    "trouillot-global": "Global Transformations",
+    "newton-mother-camp": "Mother Camp: Female Impersonators in America",
+    "newton-cherry-grove": "Cherry Grove, Fire Island",
+    "newton-butch": "My Butch Career",
+    "stoler-intimacies": "Carnal Knowledge and Imperial Power",
+    "stoler-archives": "Along the Archival Grain",
+    "stoler-duress": "Duress: Imperial Durabilities in Our Times",
+    "miller-things": "Material Culture and Mass Consumption",
+    "miller-stuff": "Stuff",
+    "miller-tales-facebook": "Tales from Facebook",
+    "miller-social-media": "How the World Changed Social Media",
+    "boellstorff-archipelago": "The Gay Archipelago",
+    "boellstorff-second-life": "Coming of Age in Second Life",
+    "boellstorff-methods": "Ethnography and Virtual Worlds",
+    "coleman-coding-freedom": "Coding Freedom",
+    "coleman-anonymous": "Hacker, Hoaxer, Whistleblower, Spy",
+    "lock-local-biology": "Encounters with Aging",
+    "lock-twice-dead": "Twice Dead",
+    "lock-biomedicine": "An Anthropology of Biomedicine",
+    "martin-woman-body": "The Woman in the Body",
+    "martin-immune": "Flexible Bodies",
+    "luhrmann-persuasion": "Persuasions of the Witch's Craft",
+    "luhrmann-mind": "Of Two Minds",
+    "luhrmann-when-god-talks-back": "When God Talks Back",
+    "luhrmann-how-god-becomes-real": "How God Becomes Real",
+    "farmer-aids": "AIDS and Accusation",
+    "farmer-violence": "An Anthropology of Structural Violence",
+    "farmer-pathologies": "Pathologies of Power",
+    "hrdy-woman": "The Woman That Never Evolved",
+    "hrdy-mother-nature": "Mother Nature",
+    "hrdy-mothers-others": "Mothers and Others",
+    "paabo-ancient-dna": "Neandertal DNA sequences and the origin of modern humans",
+    "paabo-denisova": "The complete mitochondrial genome of an extinct hominin",
+    "paabo-neanderthal-man": "Neanderthal Man: In Search of Lost Genomes",
+    "leakey-olduvai": "Olduvai Gorge: My Search for Early Man",
+    "leakey-laetoli": "Pliocene footprints in the Laetolil Beds at Laetoli",
+    "cann-mitochondrial-eve": "Mitochondrial DNA and human evolution",
+    "cann-molecular-clock": "Mitochondrial DNA and human evolution",
+    "flannery-broad-spectrum": "Origins and Ecological Effects of Early Domestication in Iran and the Near East",
+    "flannery-mesoamerican-village": "The Early Mesoamerican Village",
+    "behar-translated-woman": "Translated Woman",
+    "behar-vulnerable-observer": "The Vulnerable Observer",
+    "xiang-zhejiangcun": "Transcending Boundaries: Zhejiangcun",
+    "xiang-body-shopping": "Global \"Body Shopping\"",
+    "xiang-nearby": "附近的消失",
+    "xiang-self-as-method": "把自己作为方法"
+  ,
+    "fei-reproduction": "生育制度",
+    "fei-small-town": "小城镇大问题",
+    "fei-cultural-awareness": "反思·对话·文化自觉",
+    "yan-individualization": "The Individualization of Chinese Society",
+    "lin-ancestors": "Under the Ancestors' Shadow",
+    "childe-urban-revolution": "The Urban Revolution",
+    "childe-social-evolution": "Social Evolution",
+    "childe-danube": "The Danube in Prehistory",
+    "binford-nunamiut": "Nunamiut Ethnoarchaeology",
+    "binford-bones": "Bones: Ancient Men and Modern Myths",
+    "hodder-domestication": "The Domestication of Europe",
+    "hodder-entangled": "Entangled",
+    "washburn-hunting": "The Evolution of Hunting",
+    "montagu-concept-race": "The Concept of Race",
+    "montagu-touching": "Touching: The Human Significance of the Skin",
+    "lewontin-spandrels": "The Spandrels of San Marco",
+    "lewontin-ideology": "Biology as Ideology",
+    "goodall-window": "Through a Window",
+    "goodall-hope": "Reason for Hope",
+    "dewaal-bonobo": "Bonobo: The Forgotten Ape",
+    "dewaal-empathy": "The Age of Empathy",
+    "kleinman-neurasthenia": "Social Origins of Distress and Disease",
+    "kleinman-social-suffering": "Social Suffering",
+    "kleinman-caregiving": "The Soul of Care"
   }
 };
