@@ -73,7 +73,7 @@ const state = {
   periods: new Set(D.periods.map(p => p.id)),
   edges: new Set(["agree", "disagree"]),
   basics: false,        // 只保留核心人物
-  keys: false,          // 只保留每位学者的“要点”观点
+  keys: true,           // 只保留每位学者的“要点”观点（默认开，点距更疏朗）
   labels: true,         // 画布上显示观点文字
   q: "",
   focus: null,          // {kind:"person"|"stmt", id}
@@ -144,7 +144,7 @@ function alphaFor(s, fs) {
 }
 
 /* ---------------- 布局 ---------------- */
-const layout = { st: null, pt: null, pg: null };
+const layout = { st: null, pt: null, pg: null, medianYear: null };
 
 function buildSentenceLayout() {
   const rows = [];
@@ -281,7 +281,53 @@ function buildMapLayout() {
     bounds: { minX: mapX(-180), maxX: mapX(180), minY: mapY(80), maxY: mapY(-58) }
   };
 }
-function buildLayouts() { buildSentenceLayout(); buildPeopleLayout(); buildGraph(); buildMapLayout(); }
+function buildLayouts() {
+  buildSentenceLayout(); buildPeopleLayout(); buildGraph(); buildMapLayout();
+  const yrs = stmts.filter(s => s.key).map(s => s.year).sort((a, b) => a - b);
+  layout.medianYear = yrs.length ? yrs[Math.floor(yrs.length / 2)] : null;   // 文字最密的一段
+}
+
+/* 视图边距：fitView 用带页边距的一套；applyDefaultZoom 只留顶栏与底部图例实际占用的高度 */
+const VIEW_PAD = v => v === "pg" ? { l: 100, r: 100, t: 96, b: 252 }
+                   : v === "mp" ? { l: 120, r: 120, t: 100, b: 252 }
+                   : v === "st" ? { l: 200, r: 80, t: 96, b: 252 }
+                   : { l: 220, r: 80, t: 96, b: 252 };
+const VIEW_TOP = 118, VIEW_BOTTOM = 150;
+
+/* 顶栏与底部图例实际占用的高度：直接量 DOM，比写死数字稳（药丸换行或按钮出现时会变） */
+function usableBand() {
+  const bar = document.getElementById("topControlBar"), hd = document.getElementById("header");
+  const t = (bar ? bar.getBoundingClientRect().bottom : VIEW_TOP) + 10;
+  const b = (hd ? hd.getBoundingClientRect().top : H - VIEW_BOTTOM) - 10;
+  return { t: Math.max(0, t), b: Math.max(t + 120, b) };
+}
+
+/* 打开某个视图时默认比「适应屏幕」再放大一档（上限见下表，窗口越大越接近上限），
+   但不能超过「顶栏与底部图例之间刚好装得下全部内容」——默认取景永远不把点藏到屏幕外或压在图例下。
+   实际边界直接量 DOM（药丸换行、按钮出现都会改变占用高度）。「适应屏幕」按钮可一键回到带页边距的全景 */
+const DEFAULT_ZOOM = { st: 1.42, pt: 1.18, pg: 1.3, mp: 1.16 };
+function applyDefaultZoom(v) {
+  const c = cams[v];
+  if (!c || !c.fitS) return;
+  const b = worldBounds(), p = VIEW_PAD(v);
+  const band = usableBand();
+  const bw = Math.max(1e-6, b.maxX - b.minX), bh = Math.max(1e-6, b.maxY - b.minY);
+  const avW = Math.max(120, W - p.l - p.r), avH = Math.max(120, band.b - band.t);
+  const z = Math.max(1, Math.min(DEFAULT_ZOOM[v] || 1, avW / (bw * c.fitS), avH / (bh * c.fitS)));
+  c.s = c.fitS * z;
+  // 横向：内容比可用区宽时从文字最密的年份看起，否则整段居中
+  const wide = bw * c.s > avW;
+  const wantX = (wide && (v === "st" || v === "pt") && layout.medianYear != null)
+    ? layout.medianYear : (b.minX + b.maxX) / 2;
+  c.x = wantX - ((p.l + avW / 2) - W / 2) / c.s;
+  if (wide) {
+    const halfW = W / 2 / c.s;
+    c.x = Math.max(b.minX - 60 / c.s + halfW, Math.min(b.maxX + 60 / c.s - halfW, c.x));
+  }
+  // 纵向：内容在顶栏与底部图例之间居中
+  c.y = (b.minY + b.maxY) / 2 - ((band.t + avH / 2) - H / 2) / c.s;
+  render();
+}
 
 /* ---------------- 视图边界与适配 ---------------- */
 function worldBounds() {
@@ -300,10 +346,7 @@ function worldBounds() {
 function fitView() {
   if (state.view === "ix") return;   // 索引视图为 HTML 列表，不需要画布适配
   const b = worldBounds();
-  const pad = state.view === "pg" ? { l: 100, r: 100, t: 96, b: 252 }
-            : state.view === "mp" ? { l: 120, r: 120, t: 100, b: 252 }
-            : state.view === "st" ? { l: 200, r: 80, t: 96, b: 252 }
-            : { l: 220, r: 80, t: 96, b: 252 };
+  const pad = VIEW_PAD(state.view);
   const vw = Math.max(120, W - pad.l - pad.r), vh = Math.max(120, H - pad.t - pad.b);
   const s = Math.min(vw / Math.max(1e-6, b.maxX - b.minX), vh / Math.max(1e-6, b.maxY - b.minY));
   const c = cam();
@@ -486,12 +529,62 @@ const VIEW_LABELS = { st: "观点时间线", pt: "人物时间线", pg: "人物�
 
 /* ---------------- 颜色 ---------------- */
 const C = () => state.dark
-  ? { bg: "#101112", ink: "#f2f2f2", soft: "rgba(255,255,255,.16)", grid: "rgba(255,255,255,.07)",
-      label: "rgba(255,255,255,.78)", sub: "rgba(255,255,255,.42)", dotRing: "#101112",
-      agree: "#5fbf6a", disagree: "#d3706a", edgeA: 0.5 }
-  : { bg: "#ffffff", ink: "#000000", soft: "rgba(0,0,0,.22)", grid: "rgba(0,0,0,.06)",
-      label: "rgba(0,0,0,.8)", sub: "rgba(0,0,0,.45)", dotRing: "#ffffff",
-      agree: "#4ea155", disagree: "#c4554f", edgeA: 0.45 };
+  ? { bg: "#111316", ink: "#f2f2f2", soft: "rgba(255,255,255,.17)", grid: "rgba(255,255,255,.075)",
+      label: "rgba(255,255,255,.8)", sub: "rgba(255,255,255,.44)", dotRing: "#111316",
+      plate: "rgba(18,20,24,.74)", edgeA: 0.56, deep: "rgba(0,0,0,.5)",
+      agree: "#5fbf6a", disagree: "#d3706a" }
+  : { bg: "#fbf8f3", ink: "#16130f", soft: "rgba(40,32,20,.24)", grid: "rgba(60,45,25,.085)",
+      label: "rgba(22,19,15,.82)", sub: "rgba(22,19,15,.46)", dotRing: "#fbf8f3",
+      plate: "rgba(252,250,246,.8)", edgeA: 0.5, deep: "rgba(120,96,58,.10)",
+      agree: "#4a9a52", disagree: "#c0524b" };
+
+/* ---------------- 背景 ---------------- */
+let bgCanvas = null, bgW = 0, bgH = 0, bgDPR = 0, bgDark = null;
+function buildBackground() {
+  bgW = W; bgH = H; bgDPR = DPR; bgDark = state.dark;
+  bgCanvas = document.createElement("canvas");
+  bgCanvas.width = Math.max(1, Math.round(W * DPR));
+  bgCanvas.height = Math.max(1, Math.round(H * DPR));
+  const g = bgCanvas.getContext("2d");
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const grd = g.createLinearGradient(0, 0, W * 0.45, H);
+  if (state.dark) {
+    grd.addColorStop(0, "#14171c"); grd.addColorStop(0.5, "#0e1013"); grd.addColorStop(1, "#0a0b0d");
+  } else {
+    grd.addColorStop(0, "#ffffff"); grd.addColorStop(0.5, "#fdfbf7"); grd.addColorStop(1, "#f7f2ea");
+  }
+  g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  const R = Math.max(W, H);
+  const glow = (cx, cy, rad, c0) => {
+    const q = g.createRadialGradient(cx * W, cy * H, 0, cx * W, cy * H, rad);
+    q.addColorStop(0, c0); q.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = q; g.fillRect(0, 0, W, H);
+  };
+  if (state.dark) {
+    glow(0.82, 0.08, R * 0.60, "rgba(86,130,178,.17)");
+    glow(0.08, 0.96, R * 0.58, "rgba(126,84,168,.10)");
+  } else {
+    glow(0.82, 0.06, R * 0.60, "rgba(255,196,116,.13)");
+    glow(0.04, 0.98, R * 0.58, "rgba(146,196,224,.13)");
+  }
+  const vg = g.createRadialGradient(W * 0.5, H * 0.46, Math.min(W, H) * 0.28, W * 0.5, H * 0.46, R * 0.8);
+  vg.addColorStop(0, "rgba(0,0,0,0)");
+  vg.addColorStop(1, state.dark ? "rgba(0,0,0,.40)" : "rgba(126,102,64,.05)");
+  g.fillStyle = vg; g.fillRect(0, 0, W, H);
+  const tile = document.createElement("canvas"); tile.width = 96; tile.height = 96;
+  const tg = tile.getContext("2d");
+  const img = tg.createImageData(96, 96);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = 128 + (Math.random() * 2 - 1) * 46;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 11;
+  }
+  tg.putImageData(img, 0, 0);
+  g.globalAlpha = state.dark ? 0.4 : 0.42;
+  g.fillStyle = g.createPattern(tile, "repeat");
+  g.fillRect(0, 0, W, H);
+  g.globalAlpha = 1;
+}
 
 /* ---------------- 渲染 ---------------- */
 let hits = [];
@@ -503,7 +596,8 @@ function render() {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   const col = C();
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = col.bg; ctx.fillRect(0, 0, W, H);
+  if (!bgCanvas || bgW !== W || bgH !== H || bgDPR !== DPR || bgDark !== state.dark) buildBackground();
+  ctx.drawImage(bgCanvas, 0, 0, W, H);
   hits = [];
   const isIndex = state.view === "ix";
   document.body.classList.toggle("index-mode", isIndex);
@@ -660,8 +754,8 @@ function renderSentence(col, fs) {
     const x = 88;
     ctx.save();
     ctx.globalAlpha = n > 0 ? 1 : 0.35;
-    ctx.fillStyle = col.bg;
-    ctx.fillRect(x - 6, yc - 11, 168, 22);
+    ctx.fillStyle = col.plate;
+    ctx.fillRect(x - 8, yc - 12, 182, 24);
     ctx.fillStyle = row.branch.color;
     ctx.beginPath(); ctx.arc(x + 2, yc - 3, 4, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = n > 0 ? col.ink : col.sub;
@@ -807,7 +901,7 @@ function renderPeople(col, fs) {
     ctx.save();
     ctx.globalAlpha = fsInfo ? 0.3 : 0.96;
     const tw = ctx.measureText(p.name).width;
-    ctx.fillStyle = col.bg;
+    ctx.fillStyle = col.plate;
     ctx.fillRect(Math.max(12, labelX - tw - 8), rowY - 8, tw + 10, 16);
     ctx.textAlign = "right";
     ctx.lineWidth = 3; ctx.strokeStyle = col.bg;
@@ -1190,13 +1284,30 @@ canvas.addEventListener("wheel", e => {
 canvas.addEventListener("dblclick", () => fitView());
 canvas.addEventListener("pointerleave", () => { hideTooltip(); hover = null; render(); });
 
+/* 该项此刻是否真的在图上：被筛掉、只剩 0.05 透明度的点不该被悬停/点击碰到 */
+function hitLive(h) {
+  if (h.kind === "stmt") return stmtActive(h.item);
+  if (h.kind === "person") return h.item.stmtList.some(stmtActive);
+  return true;
+}
 function pick(x, y, maxDist) {
-  for (let i = 0; i < hits.length; i++) {          // 文字标签优先命中
+  // 1) 贴着某个圆点/节点时，永远先命中它，不会被压在上面的文字抢走
+  let best = null, bd = Math.min(maxDist, 9);
+  hits.forEach(h => {
+    if (h.rect || !hitLive(h)) return;
+    const d = Math.hypot(h.x - x, h.y - y);
+    if (d < bd) { bd = d; best = h; }
+  });
+  if (best) return best;
+  // 2) 其次看文字标签
+  for (let i = 0; i < hits.length; i++) {
     const h = hits[i];
     if (h.rect && x >= h.rect.x && x <= h.rect.x + h.rect.w && y >= h.rect.y && y <= h.rect.y + h.rect.h) return h;
   }
-  let best = null, bd = maxDist;
+  // 3) 兜底：最近的一个可见对象
+  bd = maxDist;
   hits.forEach(h => {
+    if (!hitLive(h)) return;
     const d = Math.hypot(h.x - x, h.y - y);
     if (d < bd) { bd = d; best = h; }
   });
@@ -1520,21 +1631,35 @@ function buildPills() {
   const basicsWrap = document.getElementById("basicsPills");
   basicsWrap.innerHTML = `
     <div class="item basics-item" id="basicsPill" title="只保留最核心的入门人物">入门</div>
-    <div class="item basics-item" id="keysPill" title="只显示每位学者 2–3 条代表性观点（选择 prominent ideas by each philosopher）">要点</div>
+    <div class="item basics-item selected" id="keysPill" title="只显示每位学者 2–3 条代表性观点（默认开启，关掉可看全部 347 条观点）">要点</div>
     <div class="item basics-item selected" id="labelsPill" title="在圆点旁直接写出观点摘要；缩放到更近时会显示更多">文字</div>
     <span class="material-help" title="“入门”只保留 20 位最核心的人物；“要点”只保留每位学者 2–3 条代表性观点，其余观点可关掉“要点”查看；“文字”控制是否在图上直接显示观点摘要，放大后会出现更多句。"></span>`;
 
-  branchWrap.querySelectorAll(".item").forEach(el => el.onclick = () => {
+  /* 单击 = 只看这一个（其余的点直接消失）；再点一次 = 全部；Shift/⌘ 点击 = 多选 */
+  const soloClick = (key, allIds) => (el, ev) => {
     const id = el.dataset.id;
-    if (state.branches.has(id)) { state.branches.delete(id); el.classList.remove("selected"); }
-    else { state.branches.add(id); el.classList.add("selected"); }
-    syncHash(); render(); updateAuxButtons();
+    const set = state[key];          // 每次点击都从 state 取：重置筛选/URL 状态会换掉整个 Set
+    const multi = ev.shiftKey || ev.metaKey || ev.ctrlKey;
+    if (multi) {
+      if (set.has(id)) set.delete(id); else set.add(id);
+      if (!set.size) allIds.forEach(x => set.add(x));
+    } else if (set.size === 1 && set.has(id)) {
+      allIds.forEach(x => set.add(x));
+    } else {
+      set.clear(); set.add(id);
+    }
+    syncPillStates(); syncHash(); render(); updateAuxButtons();
+    keepActiveInView();
+  };
+  const branchSolo = soloClick("branches", D.branches.map(b => b.id));
+  branchWrap.querySelectorAll(".item").forEach(el => {
+    el.title = el.title + " ｜ 单击只看这一个领域，再点一次恢复全部；Shift/⌘ 点击可多选";
+    el.onclick = ev => branchSolo(el, ev);
   });
-  periodWrap.querySelectorAll(".item").forEach(el => el.onclick = () => {
-    const id = el.dataset.id;
-    if (state.periods.has(id)) { state.periods.delete(id); el.classList.remove("selected"); }
-    else { state.periods.add(id); el.classList.add("selected"); }
-    syncHash(); render(); updateAuxButtons();
+  const periodSolo = soloClick("periods", D.periods.map(p => p.id));
+  periodWrap.querySelectorAll(".item").forEach(el => {
+    el.title = "单击只看这个时期（其余的点会消失），再点一次恢复全部；Shift/⌘ 点击可多选";
+    el.onclick = ev => periodSolo(el, ev);
   });
   edgeWrap.querySelectorAll(".item").forEach(el => el.onclick = () => {
     const t = el.dataset.edge;
@@ -1561,22 +1686,44 @@ function buildPills() {
     syncHash(); render(); updateAuxButtons();
   };
 }
+function syncPillStates() {
+  document.querySelectorAll(".branch-item").forEach(el => el.classList.toggle("selected", state.branches.has(el.dataset.id)));
+  document.querySelectorAll(".period-item").forEach(el => el.classList.toggle("selected", state.periods.has(el.dataset.id)));
+  document.querySelectorAll(".edge-item").forEach(el => el.classList.toggle("selected", state.edges.has(el.dataset.edge)));
+}
 function updateAuxButtons() {
   const anyOff = state.branches.size !== D.branches.length || state.periods.size !== D.periods.length ||
-                 state.edges.size !== 2 || state.basics || state.keys || !state.labels || !!qNorm();
+                 state.edges.size !== 2 || state.basics || !state.keys || !state.labels || !!qNorm();
   document.getElementById("resetFiltersBtn").hidden = !anyOff;
   document.getElementById("clearFocusBtn").hidden = !state.focus;
+}
+
+/* 筛选后如果视野里一个点都不剩，就把镜头平移到剩下这些点的中间（st/pt 横轴是年份，缩放不变） */
+function keepActiveInView() {
+  if (state.view !== "st" && state.view !== "pt") return;
+  const band = usableBand();
+  const onScreen = hits.some(h => h.kind === "stmt" && hitLive(h) &&
+                                 h.x > 0 && h.x < W && h.y > band.t && h.y < band.b);
+  if (onScreen) return;
+  const act = stmts.filter(s => stmtActive(s));
+  if (!act.length) return;
+  const key = state.view === "st" ? "_st" : "_pt";
+  const mid = arr => arr.sort((a, b) => a - b)[Math.floor(arr.length / 2)];
+  const c = cam();
+  c.x = mid(act.map(s => s[key].x));
+  c.y = mid(act.map(s => s[key].y));
+  render();
 }
 function resetFilters() {
   state.branches = new Set(D.branches.map(b => b.id));
   state.periods = new Set(D.periods.map(p => p.id));
   state.edges = new Set(["agree", "disagree"]);
-  state.basics = false; state.keys = false; state.labels = true; state.q = "";
+  state.basics = false; state.keys = true; state.labels = true; state.q = "";
   document.getElementById("search").value = "";
   document.getElementById("clearSearchBtn").style.display = "none";
   document.querySelectorAll(".branch-item,.period-item,.edge-item").forEach(el => el.classList.add("selected"));
   document.getElementById("basicsPill").classList.remove("selected");
-  document.getElementById("keysPill").classList.remove("selected");
+  document.getElementById("keysPill").classList.add("selected");
   document.getElementById("labelsPill").classList.add("selected");
   syncHash(); render(); updateAuxButtons();
 }
@@ -1605,7 +1752,9 @@ function setView(v) {
   viewSelector.querySelectorAll(".dropdown-item").forEach(el => el.classList.toggle("selected", el.dataset.view === v));
   viewSelector.querySelector(".selected-view .view-icon").innerHTML = iconFor(v);
   hover = null; hideTooltip();
-  fitView(); syncHash();
+  fitView(); applyDefaultZoom(v);
+  if (state.view === "ix") render();     // 索引视图是 HTML 列表，fitView/默认取景都会提前返回，这里补一次渲染
+  syncHash();
 }
 function iconFor(v) {
   if (v === "st") return `<svg viewBox="0 0 18 14"><line x1="1" y1="4" x2="17" y2="4"/><line x1="1" y1="10" x2="17" y2="10"/><circle cx="6" cy="4" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="10" r="2" fill="currentColor" stroke="none"/></svg>`;
@@ -1704,7 +1853,7 @@ function syncHash() {
   if (state.periods.size !== D.periods.length) parts.push("periods=" + [...state.periods].join(","));
   if (state.edges.size !== 2) parts.push("edges=" + [...state.edges].join(","));
   if (state.basics) parts.push("basics=1");
-  if (state.keys) parts.push("keys=1");
+  if (!state.keys) parts.push("keys=0");
   if (!state.labels) parts.push("labels=0");
   if (qNorm()) parts.push("q=" + encodeURIComponent(state.q));
   if (state.focus) parts.push("focus=" + state.focus.kind + ":" + state.focus.id);
@@ -1733,7 +1882,7 @@ function readHash() {
     document.querySelectorAll(".edge-item").forEach(el => el.classList.toggle("selected", state.edges.has(el.dataset.edge)));
   }
   if (params.get("basics")) { state.basics = true; document.getElementById("basicsPill").classList.add("selected"); }
-  if (params.get("keys")) { state.keys = true; document.getElementById("keysPill").classList.add("selected"); }
+  if (params.get("keys") === "0") { state.keys = false; document.getElementById("keysPill").classList.remove("selected"); }
   if (params.get("labels") === "0") { state.labels = false; document.getElementById("labelsPill").classList.remove("selected"); }
   const q = params.get("q");
   if (q) { state.q = q; searchInput.value = q; clearSearchBtn.style.display = "flex"; document.querySelector(".topbar-search-container").classList.add("active"); }
@@ -1760,6 +1909,7 @@ readHash();
 window.addEventListener("resize", resize);
 resize();
 fitView();
+applyDefaultZoom(state.view);
 updateAuxButtons();
 
 /* 调试/集成接口 */
