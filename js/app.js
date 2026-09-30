@@ -35,11 +35,17 @@ people.forEach(p => {
 
 const bornLabel = p => (p.bornApprox ? "约 " : "") + p.born;   // 生年不确定者标“约”
 
-const edges = [];                    // 观点级关系
+const edges = [];                    // 跨学者的观点级关系（画布、统计、导出使用）
+const intraEdges = [];               // 同一学者内部的承接（只在详情/索引里显示，不画在画布上）
+const seenEdge = new Set();
 stmts.forEach(s => (s.links || []).forEach(l => {
   const t = stmtById.get(l.to);
   if (!t) { console.warn("未找到关联观点：", s.id, "->", l.to); return; }
-  s.rel.push({ other: t, type: l.type, note: l.note });
+  s.rel.push({ other: t, type: l.type, note: l.note });     // 详情抽屉用：含同一学者内部关系
+  if (t.person === s.person) { intraEdges.push({ a: s, b: t, type: l.type, note: l.note }); return; }
+  const k = (s.id < t.id ? s.id + "|" + t.id : t.id + "|" + s.id) + ":" + l.type;
+  if (seenEdge.has(k)) return;                              // 双向重复只画一次
+  seenEdge.add(k);
   edges.push({ a: s, b: t, type: l.type, note: l.note });
 }));
 
@@ -58,6 +64,7 @@ const pEdgeByPair = new Map(pEdges.map(pe => [pe.a + "|" + pe.b, pe]));
 const branchById = new Map(D.branches.map(b => [b.id, b]));
 const periodById = new Map(D.periods.map(p => [p.id, p]));
 const starter = new Set(D.starter);
+const peopleByBorn = [...people].sort((a, b) => a.born - b.born);
 
 /* ---------------- 状态 ---------------- */
 const state = {
@@ -65,7 +72,9 @@ const state = {
   branches: new Set(D.branches.map(b => b.id)),
   periods: new Set(D.periods.map(p => p.id)),
   edges: new Set(["agree", "disagree"]),
-  basics: false,
+  basics: false,        // 只保留核心人物
+  keys: false,          // 只保留每位学者的“要点”观点
+  labels: true,         // 画布上显示观点文字
   q: "",
   focus: null,          // {kind:"person"|"stmt", id}
   highlightStmt: null,
@@ -106,6 +115,7 @@ function stmtActive(s) {
   if (!state.branches.has(s.branch)) return false;
   if (!state.periods.has(s.person.period)) return false;
   if (state.basics && !starter.has(s.person.id)) return false;
+  if (state.keys && !s.key) return false;
   if (!matchesQuery(s)) return false;
   return true;
 }
@@ -319,6 +329,159 @@ function centerOn(wx, wy, minScale) {
   c.x = wx + shift; c.y = wy; render();
 }
 
+/* 当前被强调的人物/观点：悬停优先，其次是点击选中的焦点 */
+function hotStmt() {
+  if (hover && hover.kind === "stmt") return hover.item;
+  if (state.highlightStmt) return stmtById.get(state.highlightStmt) || null;
+  return null;
+}
+function hotKey() {
+  if (hover && hover.kind === "person") return hover.item.id;
+  const s = hotStmt(); if (s) return s.person.id;
+  if (state.focus) {
+    if (state.focus.kind === "person") return state.focus.id;
+    const f = stmtById.get(state.focus.id); if (f) return f.person.id;
+  }
+  return null;
+}
+function edgeStyle(e, col) {
+  const hs = hotStmt();
+  if (hs) return (e.a === hs || e.b === hs) ? { a: 0.9, w: 1.7 } : { a: 0.04, w: 0.8 };
+  const hp = hotKey();
+  if (hp) return (e.a.person.id === hp || e.b.person.id === hp) ? { a: 0.5, w: 1.4 } : { a: 0.045, w: 0.8 };
+  return { a: col.edgeA * 0.6, w: 0.9 };
+}
+
+/* ---------------- 画布文字层（观点文字 / 姓名） ---------------- */
+let labelRects = [];
+let labelCount = 0;
+function reserveRect(x, y, w, h, pad) {
+  if (!isFinite(x) || !isFinite(y) || !isFinite(w) || !isFinite(h)) return false;
+  const pd = pad == null ? 2 : pad;
+  const r = { x: x - pd, y: y - pd, w: w + pd * 2, h: h + pd * 2 };
+  for (let i = 0; i < labelRects.length; i++) {
+    const q = labelRects[i];
+    if (!(r.x > q.x + q.w || r.x + r.w < q.x || r.y > q.y + q.h || r.y + r.h < q.y)) return false;
+  }
+  labelRects.push(r); return true;
+}
+function truncateToWidth(text, font, maxW) {
+  ctx.font = font;
+  if (ctx.measureText(text).width <= maxW) return text;
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (ctx.measureText(text.slice(0, mid) + "…").width <= maxW) lo = mid; else hi = mid - 1;
+  }
+  return text.slice(0, lo) + "…";
+}
+function labelLevel() {           // 缩放越大，显示的文字越多
+  const c = cam(), z = c.s / (c.fitS || 1);
+  return z > 2.4 ? 3 : z > 1.45 ? 2 : 1;
+}
+function labelCandidates(fs, posOf) {
+  const lvl = labelLevel(), max = lvl === 1 ? 140 : lvl === 2 ? 320 : 700;
+  const out = [];
+  stmts.forEach(s => {
+    if (alphaFor(s, fs) < 0.5) return;
+    const isHover = !!(hover && hover.kind === "stmt" && hover.item === s);
+    const isHi = state.highlightStmt === s.id;
+    const marked = !!s.key;
+    if (!isHover && !isHi) {
+      if (lvl === 1 && firstKeyOf.get(s.person.id) !== s) return;
+      if (lvl === 2 && !marked && !(s.rel && s.rel.length)) return;
+    }
+    const p = posOf(s); if (!p) return;
+    if (p[0] < -360 || p[0] > W + 360 || p[1] < -24 || p[1] > H + 24) return;
+    out.push({ s, p, marked, isHover, isHi, deg: (s.rel || []).length });
+  });
+  out.sort((a, b) => (b.isHover - a.isHover) || (b.isHi - a.isHi) || (b.marked - a.marked)
+                   || (b.deg - a.deg) || (a.s.year - b.s.year));
+  return out.slice(0, max);
+}
+function drawStatementLabel(c, col) {
+  const s = c.s;
+  const tag = (s.person.tags && s.person.tags[0]) || branchById.get(s.branch).label;
+  const tagFont = `10.5px ${FONT}`, textFont = c.marked ? `600 12px ${FONT}` : `12px ${FONT}`;
+  const text = truncateToWidth(s.text, textFont, 460);
+  ctx.font = tagFont; const tagW = ctx.measureText(tag).width + 9;
+  ctx.font = textFont; const textW = ctx.measureText(text).width;
+  const totalW = tagW + textW, h = 16;
+  const offsets = [0, -15, 15, -30, 30, -45, 45, -60, 60];
+  for (let i = 0; i < offsets.length; i++) {
+    const dy = offsets[i];
+    for (let k = 0; k < 2; k++) {
+      const x = k === 0 ? c.p[0] + 9 : c.p[0] - 9 - totalW;
+      const yBase = c.p[1] + dy;                      // 文字基线
+      if (x < 6 || x + totalW > W - 6) continue;
+      if (yBase < 88 || yBase > H - 104) continue;
+      if (yBase > H - 186 && x + totalW < 760) continue;   // 左下角留给标题与图例
+      if (!reserveRect(x, yBase - 11, totalW, h)) continue;
+      ctx.save();
+      ctx.globalAlpha = c.isHover || c.isHi ? 1 : 0.94;
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      ctx.font = tagFont; ctx.fillStyle = col.sub;
+      ctx.fillText(tag, x, yBase);
+      ctx.font = textFont; ctx.fillStyle = c.marked ? col.ink : col.label;
+      ctx.fillText(text, x + tagW, yBase);
+      ctx.restore();
+      hits.push({ x: c.p[0], y: c.p[1], kind: "stmt", item: s,
+                  rect: { x: x - 2, y: yBase - 12, w: totalW + 4, h: h + 2 } });
+      labelCount++;
+      return true;
+    }
+  }
+  return false;
+}
+function drawPersonAnchorLabels(col, fs, posOf, order) {
+  order.forEach(p => {
+    const act = p.stmtList.filter(s => alphaFor(s, fs) > 0.5);
+    if (!act.length) return;
+    const anchor = act.reduce((a, b) => (b.year < a.year ? b : a), act[0]);
+    const pos = posOf(anchor); if (!pos) return;
+    if (pos[0] < -100 || pos[0] > W + 100 || pos[1] < 0 || pos[1] > H - 20) return;
+    const years = p.died ? `${bornLabel(p)}—${p.died}` : `${bornLabel(p)}—`;
+    const nameFont = `600 12.5px ${FONT}`, yearFont = `10.5px ${FONT}`;
+    ctx.font = nameFont; const nw = ctx.measureText(p.name).width;
+    ctx.font = yearFont; const yw = ctx.measureText(years).width;
+    const totalW = nw + 6 + yw;
+    const offsets = [-20, -35, 16, -50, 31, -65, 46];
+    for (let i = 0; i < offsets.length; i++) {
+      for (let k = 0; k < 2; k++) {
+        const x = k === 0 ? pos[0] + 9 : pos[0] - 9 - totalW;
+        const yBase = pos[1] + offsets[i];
+        if (x < 6 || x + totalW > W - 6) continue;
+        if (yBase < 16 || yBase > H - 26) continue;
+        if (!reserveRect(x, yBase - 12, totalW, 17, 3)) continue;
+        ctx.save();
+        ctx.globalAlpha = fs && !fs.ids.has(p.id) ? 0.45 : 1;
+        ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+        ctx.strokeStyle = col.bg; ctx.lineWidth = 3;
+        ctx.font = nameFont; ctx.strokeText(p.name, x, yBase);
+        ctx.fillStyle = col.ink; ctx.fillText(p.name, x, yBase);
+        ctx.font = yearFont; ctx.strokeText(years, x + nw + 6, yBase);
+        ctx.fillStyle = col.sub; ctx.fillText(years, x + nw + 6, yBase);
+        ctx.restore();
+        hits.push({ x: x + nw / 2, y: yBase - 4, kind: "person", item: p,
+                    rect: { x: x - 2, y: yBase - 13, w: totalW + 4, h: 18 } });
+        return;
+      }
+    }
+  });
+}
+function drawLabels(col, fs, posOf, order, withAnchors, preRects) {
+  if (!state.labels) return;
+  labelRects = preRects ? preRects.slice() : []; labelCount = 0;
+  stmts.forEach(s => {                      // 先占位：所有可见圆点都不被文字压住
+    if (alphaFor(s, fs) < 0.5) return;
+    const p = posOf(s); if (!p) return;
+    if (p[0] < -20 || p[0] > W + 20 || p[1] < -20 || p[1] > H + 20) return;
+    reserveRect(p[0] - 5, p[1] - 5, 10, 10, 0);
+  });
+  if (withAnchors) drawPersonAnchorLabels(col, fs, posOf, order);
+  labelCandidates(fs, posOf).forEach(c => drawStatementLabel(c, col));
+}
+
 const VIEW_LABELS = { st: "观点时间线", pt: "人物时间线", pg: "人物图谱", mp: "田野地图", ix: "观点索引" };
 
 /* ---------------- 颜色 ---------------- */
@@ -380,6 +543,13 @@ function drawYearAxis(col) {
   ctx.restore();
 }
 
+/* 关系弧线：同意一律向下鼓、分歧一律向上鼓——两个家族各自成束，而不是缠成一团 */
+function arcBend(p1, p2, type) {
+  const d = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+  const mag = Math.min(150, 14 + d * 0.2);
+  return type === "agree" ? mag : -mag;
+}
+
 function curve(p1, p2, bend) {
   const mx = (p1[0] + p2[0]) / 2, my = (p1[1] + p2[1]) / 2 + bend;
   ctx.beginPath();
@@ -388,13 +558,103 @@ function curve(p1, p2, bend) {
   ctx.stroke();
 }
 
+/* 观点时间线的“文字带”——与参考站一致：文字本身即节点，圆点画在文字起点上。
+   横向位置严格等于观点年份；纵向按缩放级别贪心分行，未排到文字的观点仍是裸圆点。
+   1 级＝每位学者 1 条代表作，2 级＝全部要点，3 级＝全部观点。 */
+const firstKeyOf = new Map();
+stmts.forEach(s => {
+  if (!s.key) return;
+  const k = s.person.id, cur = firstKeyOf.get(k);
+  if (!cur || s.year < cur.year) firstKeyOf.set(k, s);
+});
+function timelinePack(fs) {
+  const out = new Map();
+  const put = (s, x, y, label) => out.set(s, { x, y, label });
+  if (!state.labels) {
+    stmts.forEach(s => { const p = P(s._st.x, s._st.y); put(s, p[0], p[1]); });
+    return out;
+  }
+  labelRects = []; labelCount = 0;
+  const lvl = labelLevel();
+  const bandYOf = new Map();
+  layout.st.rows.forEach(r => bandYOf.set(r.branch.id, P(cam().x, r.center)[1]));
+  const groups = new Map();
+  stmts.forEach(s => {
+    if (alphaFor(s, fs) < 0.5) return;
+    const p = P(s._st.x, s._st.y);
+    if (!isFinite(p[0]) || !isFinite(p[1])) return;
+    const isHover = !!(hover && hover.kind === "stmt" && hover.item === s);
+    const isHi = state.highlightStmt === s.id;
+    if (!isHover && !isHi) {
+      if (lvl === 1 && firstKeyOf.get(s.person.id) !== s) return;
+      if (lvl === 2 && !s.key && !(s.rel && s.rel.length)) return;
+    }
+    if (p[0] < -700 || p[0] > W + 700) return;
+    let g = groups.get(s.branch); if (!g) { g = []; groups.set(s.branch, g); }
+    g.push({ s, p, isHover, isHi });
+  });
+  const LINE = 20, MAXROW = 24;
+  groups.forEach((list, branchId) => {
+    const bandY = bandYOf.get(branchId);
+    if (bandY == null || bandY < -320 || bandY > H + 320) return;
+    list.sort((a, b) => (b.isHover - a.isHover) || (b.isHi - a.isHi) || (a.p[0] - b.p[0]));
+    const rows = [];
+    list.forEach(c => {
+      const st = c.s;
+      const tag = st.person.name.replace(/（.*?）/g, "");
+      const tagFont = `600 11px ` + FONT, textFont = `12px ` + FONT;
+      ctx.font = tagFont;
+      const nameW = ctx.measureText(tag).width;
+      const boost = (c.isHover || c.isHi) ? 360 : 0;
+      const maxW = (lvl === 1 ? 380 : lvl === 2 ? 520 : 640) + boost;
+      const dotX = c.p[0] + 6, LEAD = 8, MID = 7;   // 行首色点 → 人名 → 正文
+      let rev = false, avail;
+      const roomR = (W - 12) - dotX - LEAD - nameW - MID;
+      if (roomR >= 150) {
+        avail = Math.min(maxW, roomR);
+      } else {                                     // 右边放不下，整条文字改排到圆点左侧
+        rev = true;
+        avail = Math.min(maxW, dotX - 12 - nameW - MID);
+        if (avail < 150) return;
+      }
+      const text = truncateToWidth(st.text, textFont, avail);
+      ctx.font = textFont;
+      const textW = ctx.measureText(text).width;
+      const tagW = nameW + MID, h = 16;
+      const totalW = LEAD + tagW + textW;
+      const x = rev ? dotX - totalW : dotX + LEAD;
+      for (let r = 0; r < MAXROW; r++) {
+        while (rows.length <= r) rows.push([]);
+        const off = r === 0 ? 0 : (r % 2 ? -1 : 1) * Math.ceil(r / 2) * LINE;
+        const x0 = rev ? x - 4 : x, x1 = rev ? dotX : x + totalW;
+        const yBase = c.p[1] + off;                    // 紧贴自己的圆点，仅在碰撞时上下挪
+        if (yBase < 88 || yBase > H - 104) continue;   // 避开顶栏与底部统计
+        if (yBase > H - 186 && x1 < 760) continue;     // 左下角留给标题与筛选图例
+        if (rows[r].some(iv => !(x0 > iv[1] + 14 || x1 < iv[0] - 14))) continue;
+        if (!reserveRect(x - 6, yBase - 12, totalW + 8, h + 2)) continue;
+        rows[r].push([x0, x1]);
+        put(st, dotX, yBase + 0.5, { tag, tagW, nameW, text, textW, totalW, x, yBase, h, rev, LEAD, MID,
+                                     hot: c.isHover || c.isHi, marked: !!st.key });
+        labelCount++;
+        break;
+      }
+    });
+  });
+  stmts.forEach(s => {                            // 未排到文字的：裸圆点，仍落在真实年份
+    if (out.has(s)) return;
+    const p = P(s._st.x, s._st.y);
+    put(s, p[0], p[1]);
+  });
+  return out;
+}
+
 function renderSentence(col, fs) {
   drawYearAxis(col);
-  const c = cam();
-  // 行标签
-  ctx.font = `600 12px ${FONT}`;
+  const packed = timelinePack(fs);
+  // 领域行标签
+  ctx.font = `600 12px ` + FONT;
   layout.st.rows.forEach(row => {
-    const yc = P(c.x, row.center)[1];
+    const yc = P(cam().x, row.center)[1];
     if (yc < 40 || yc > H - 40) return;
     const n = stmts.filter(s => s.branch === row.branch.id && stmtActive(s)).length;
     const x = 88;
@@ -407,58 +667,84 @@ function renderSentence(col, fs) {
     ctx.fillStyle = n > 0 ? col.ink : col.sub;
     ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
     ctx.fillText(row.branch.label, x + 12, yc + 1);
-    ctx.fillStyle = col.sub; ctx.font = `11px ${FONT}`;
+    ctx.fillStyle = col.sub; ctx.font = `11px ` + FONT;
     ctx.fillText(String(n), x + 12 + ctx.measureText(row.branch.label).width + 22, yc + 1);
-    ctx.font = `600 12px ${FONT}`;
+    ctx.font = `600 12px ` + FONT;
     ctx.restore();
   });
-  // 关系线
+  // 关系线：只画跨学者的关系，同意向下鼓、分歧向上鼓，默认细而浅
   edges.forEach(e => {
-    const a1 = alphaFor(e.a, fs), a2 = alphaFor(e.b, fs);
-    if (a1 < 0.5 || a2 < 0.5) return;
+    if (alphaFor(e.a, fs) < 0.5 || alphaFor(e.b, fs) < 0.5) return;
     if (!state.edges.has(e.type)) return;
-    const p1 = P(e.a._st.x, e.a._st.y), p2 = P(e.b._st.x, e.b._st.y);
-    const hot = hover && hover.kind === "stmt" && (hover.item === e.a || hover.item === e.b);
+    const a = packed.get(e.a), b = packed.get(e.b);
+    if (!a || !b) return;
+    const p1 = [a.x, a.y], p2 = [b.x, b.y];
+    if (Math.max(p1[0], p2[0]) < -60 || Math.min(p1[0], p2[0]) > W + 60) return;
+    const stl = edgeStyle(e, col);
     ctx.save();
-    ctx.globalAlpha = hot ? 0.95 : col.edgeA * 0.8;
+    ctx.globalAlpha = stl.a;
     ctx.strokeStyle = e.type === "agree" ? col.agree : col.disagree;
-    ctx.lineWidth = hot ? 1.7 : 1;
-    curve(p1, p2, -(Math.abs(p2[0] - p1[0]) * 0.12 + 12));
+    ctx.lineWidth = stl.w;
+    curve(p1, p2, arcBend(p1, p2, e.type));
     ctx.restore();
   });
-  // 观点点
-  const zoomed = c.s > cam().fitS * 1.7;
-  stmts.forEach(s => {
-    const p = P(s._st.x, s._st.y);
-    if (p[0] < -40 || p[0] > W + 40 || p[1] < -40 || p[1] > H + 40) return;
-    const a = alphaFor(s, fs);
-    const isHover = hover && hover.kind === "stmt" && hover.item === s;
-    const isHi = state.highlightStmt === s.id;
-    const r = isHover ? 5.5 : (isHi ? 5 : 4);
-    ctx.save();
-    ctx.globalAlpha = a;
-    ctx.fillStyle = branchById.get(s.branch).color;
-    ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, Math.PI * 2); ctx.fill();
-    if (isHover || isHi) {
-      ctx.strokeStyle = col.ink; ctx.lineWidth = 1.2;
-      ctx.beginPath(); ctx.arc(p[0], p[1], r + 3, 0, Math.PI * 2); ctx.stroke();
-    }
-    ctx.restore();
-    hits.push({ x: p[0], y: p[1], kind: "stmt", item: s });
-    if ((zoomed && a > 0.5) || isHover) {
+  // 观点：有文字的画「人名 + 色点 + 正文」，没有文字的画裸圆点
+  stmts.forEach(st => {
+    const q = packed.get(st);
+    if (!q) return;
+    if (q.x < -60 || q.x > W + 60 || q.y < -60 || q.y > H + 60) return;
+    const a = alphaFor(st, fs);
+    const isHover = hover && hover.kind === "stmt" && hover.item === st;
+    const isHi = state.highlightStmt === st.id;
+    const color = branchById.get(st.branch).color;
+    if (q.label) {
+      const L = q.label;
+      const nameX = L.rev ? L.x + L.textW + 6 : L.x + L.LEAD;
+      const textX = L.rev ? L.x : L.x + L.LEAD + L.tagW;
       ctx.save();
-      ctx.globalAlpha = Math.min(1, a + 0.1);
-      ctx.font = `10.5px ${FONT}`; ctx.textAlign = "left";
-      const nm = s.person.name.replace(/（.*?）/g, "").slice(0, 6);
-      ctx.lineWidth = 3; ctx.strokeStyle = col.bg; ctx.strokeText(nm, p[0] + 8, p[1] + 3.5);
-      ctx.fillStyle = col.sub; ctx.fillText(nm, p[0] + 8, p[1] + 3.5);
+      ctx.globalAlpha = (isHover || isHi) ? 1 : a;
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = col.bg; ctx.lineWidth = 3.4;   // 白描边：压住背后的圆点与连线
+      ctx.font = `600 11px ` + FONT;
+      ctx.strokeText(L.tag, nameX, L.yBase);
+      ctx.font = `12px ` + FONT;
+      ctx.strokeText(L.text, textX, L.yBase);
+      ctx.beginPath(); ctx.arc(q.x, q.y, 2.9, 0, Math.PI * 2);
+      ctx.fillStyle = col.bg; ctx.fill();
+      ctx.beginPath(); ctx.arc(q.x, q.y, 2.4, 0, Math.PI * 2);
+      ctx.fillStyle = color; ctx.fill();
+      ctx.font = `600 11px ` + FONT; ctx.fillStyle = col.sub;
+      ctx.fillText(L.tag, nameX, L.yBase);
+      ctx.font = `12px ` + FONT;
+      ctx.fillStyle = L.hot ? col.ink : (L.marked ? col.ink : col.label);
+      ctx.fillText(L.text, textX, L.yBase);
+      if (L.hot) {
+        ctx.strokeStyle = col.ink; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(q.x, q.y, 5.6, 0, Math.PI * 2); ctx.stroke();
+      }
       ctx.restore();
+      hits.push({ x: q.x, y: q.y, kind: "stmt", item: st,
+                  rect: { x: L.x - 3, y: L.yBase - 13, w: L.totalW + 6, h: L.h + 3 } });
+    } else {
+      const r = isHover ? 5.5 : (isHi ? 5 : 3);
+      ctx.save();
+      ctx.globalAlpha = a * ((isHover || isHi) ? 1 : 0.55);
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, Math.PI * 2); ctx.fill();
+      if (isHover || isHi) {
+        ctx.strokeStyle = col.ink; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.arc(q.x, q.y, r + 3, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
+      hits.push({ x: q.x, y: q.y, kind: "stmt", item: st });
     }
   });
 }
 
 function renderPeople(col, fs) {
   drawYearAxis(col);
+  const preRects = [];
   const L = layout.pt;
   const anchor = new Map();
   L.order.forEach(p => {
@@ -480,16 +766,18 @@ function renderPeople(col, fs) {
     const types = new Set(list.map(e => e.type));
     const type = types.size > 1 ? "mixed" : list[0].type;
     const p1 = P(a1.x, a1.y), p2 = P(a2.x, a2.y);
-    const hot = hover && hover.kind === "person" && (hover.item.id === pe.a || hover.item.id === pe.b);
+    const hp = hotKey();
+    const hot = hp ? (hp === pe.a || hp === pe.b) : !!(hover && hover.kind === "person" && (hover.item.id === pe.a || hover.item.id === pe.b));
     ctx.save();
-    ctx.globalAlpha = hot ? 0.9 : (fs ? 0.16 : col.edgeA * 0.55);
+    ctx.globalAlpha = hp ? (hot ? 0.5 : 0.045) : (fs ? 0.14 : col.edgeA * 0.36);
     ctx.strokeStyle = type === "agree" ? col.agree : type === "disagree" ? col.disagree : col.soft;
-    ctx.lineWidth = hot ? 2 : 1;
-    curve(p1, p2, -(Math.abs(p2[0] - p1[0]) * 0.08 + 10));
+    ctx.lineWidth = hot ? 2 : 0.9;
+    curve(p1, p2, arcBend(p1, p2, type));
     ctx.restore();
   });
-  // 姓名与点
+  // 姓名与点（行太密时只给间隔够开的人署名，避免糊成一片）
   ctx.font = `11.5px ${FONT}`;
+  let lastNamedY = -1e9;
   L.order.forEach(p => {
     const rowY = P(cam().x, p._rowY)[1];
     if (rowY < 30 || rowY > H - 44) return;
@@ -510,6 +798,10 @@ function renderPeople(col, fs) {
       hits.push({ x: pos[0], y: pos[1], kind: "stmt", item: s });
     });
     if (!n) return;
+    const isHot = (hover && hover.kind === "person" && hover.item === p) ||
+                  (fs && fs.kind === "person" && fs.ids.has(p.id));
+    if (!isHot && rowY - lastNamedY < 13) return;      // 太挤就不署名
+    lastNamedY = rowY;
     const fsInfo = fs && fs.kind === "person" && !fs.ids.has(p.id);
     const labelX = Math.max(96, minX - 10);
     ctx.save();
@@ -525,7 +817,10 @@ function renderPeople(col, fs) {
     ctx.restore();
     const hp = { kind: "person", x: labelX - tw / 2, y: rowY, item: p };
     hits.push(hp);
+    preRects.push({ x: Math.max(12, labelX - tw - 8) - 3, y: rowY - 11, w: tw + 14, h: 22 });
   });
+  // 观点文字
+  drawLabels(col, fs, s => P(s._pt.x, s._pt.y), null, false, preRects);
 }
 
 function renderGraph(col, fs) {
@@ -537,14 +832,16 @@ function renderGraph(col, fs) {
     const list = l.pe.list.filter(e => state.edges.has(e.type) && alphaFor(e.a, fs) > 0.5 && alphaFor(e.b, fs) > 0.5);
     if (!list.length) return;
     const p1 = pos.get(l.a.p.id), p2 = pos.get(l.b.p.id);
-    const hot = hover && hover.kind === "person" && (hover.item.id === l.a.p.id || hover.item.id === l.b.p.id);
+    const hpg = hotKey();
+    const hot = hpg ? (hpg === l.a.p.id || hpg === l.b.p.id)
+                    : !!(hover && hover.kind === "person" && (hover.item.id === l.a.p.id || hover.item.id === l.b.p.id));
     const types = new Set(list.map(e => e.type));
     const type = types.size > 1 ? "mixed" : list[0].type;
     ctx.save();
-    ctx.globalAlpha = hot ? 0.95 : (fs ? 0.14 : 0.4);
+    ctx.globalAlpha = hpg ? (hot ? 0.55 : 0.04) : (fs ? 0.12 : 0.22);
     ctx.strokeStyle = type === "agree" ? col.agree : type === "disagree" ? col.disagree : col.soft;
-    ctx.lineWidth = hot ? 2 : Math.min(3, 0.8 + 0.35 * (list.length - 1));
-    ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.stroke();
+    ctx.lineWidth = hot ? 2 : Math.min(2.4, 0.85 + 0.25 * (list.length - 1));
+    curve(p1, p2, arcBend(p1, p2, type));
     ctx.restore();
   });
   // 节点
@@ -830,8 +1127,8 @@ function updateViewHint() {
     ? "按人物分组的全部观点列表 · 点击“定位”跳到观点时间线 · 顶栏可下载 Markdown"
     : state.view === "mp"
     ? "实心圆 = 田野点（大小 = 学者数） · 空心圆 = 机构城市 · 曲线 = 从机构所在地到田野点"
-    : state.view === "st" ? "曲线 = 观点之间的关系（绿：继承/同意 · 红：批评/分歧）"
-    : state.view === "pt" ? "每行一位学者 · 圆点 = 其观点提出的年份"
+    : state.view === "st" ? "圆点 = 一条观点 · 文字 = 观点摘要（放大显示更多） · 悬停文字只高亮相关连线 · 绿：继承/同意 红：批评/分歧"
+    : state.view === "pt" ? "每行一位学者 · 圆点 = 其观点提出的年份 · 文字 = 观点摘要（放大显示更多）"
     : "节点 = 人物（大小 = 观点数） · 连线 = 关系（绿：继承/同意 · 红：批评/分歧）";
 }
 
@@ -894,6 +1191,10 @@ canvas.addEventListener("dblclick", () => fitView());
 canvas.addEventListener("pointerleave", () => { hideTooltip(); hover = null; render(); });
 
 function pick(x, y, maxDist) {
+  for (let i = 0; i < hits.length; i++) {          // 文字标签优先命中
+    const h = hits[i];
+    if (h.rect && x >= h.rect.x && x <= h.rect.x + h.rect.w && y >= h.rect.y && y <= h.rect.y + h.rect.h) return h;
+  }
   let best = null, bd = maxDist;
   hits.forEach(h => {
     const d = Math.hypot(h.x - x, h.y - y);
@@ -1182,7 +1483,9 @@ function openAbout() {
       <span class="k">人物时间线</span>：每位学者一行，圆点是他/她在某一年提出的观点。<br>
       <span class="k">人物图谱</span>：人物按关联强度布局，绿线为继承/同意，红线为批评/分歧。<br>
       <span class="k">观点索引</span>：按人物分组的全部观点列表（含关系说明），可一键“定位”到时间线，并可下载 Markdown 全文。<br>
-      左下筛选可以按领域、时期、关系类型过滤；“入门”只保留最核心的二十位人物。点击任意圆点或节点查看文章与观点详情。</p>
+      左下筛选可以按领域、时期、关系类型过滤；“入门”只保留最核心的二十位人物，“要点”只保留每位学者 2–3 条代表性观点，“文字”控制是否在图上直接写出观点摘要。<br>
+      图上默认把代表性观点直接写成文字，悬停某句时只有与它相关的连线会亮起，其余淡出——这是主要的阅读方式：顺着一位学者的要点，看他/她与谁呼应、与谁争论。放大到更近会显示更多次要观点。<br>
+      点击任意圆点、文字或节点查看文章与观点详情。</p>
       <div class="dr-section-title">田野地图</div>
       <p><span class="k">圆点</span>是田野点/研究区域，大小代表在此做过研究的学者数；<span class="k">曲线</span>从学者主要任教或研究机构所在地连向田野点，可以直观看到二十世纪人类学的"从大都市到田野"结构。扶手椅学者（如弗雷泽）没有田野点，这一空白本身就是学科史的一部分。</p>
       <div class="dr-section-title">导出与引用</div>
@@ -1217,7 +1520,9 @@ function buildPills() {
   const basicsWrap = document.getElementById("basicsPills");
   basicsWrap.innerHTML = `
     <div class="item basics-item" id="basicsPill" title="只保留最核心的入门人物">入门</div>
-    <span class="material-help" title="“入门”会只保留 16 位最核心的人物，便于先建立整体印象"></span>`;
+    <div class="item basics-item" id="keysPill" title="只显示每位学者 2–3 条代表性观点（选择 prominent ideas by each philosopher）">要点</div>
+    <div class="item basics-item selected" id="labelsPill" title="在圆点旁直接写出观点摘要；缩放到更近时会显示更多">文字</div>
+    <span class="material-help" title="“入门”只保留 20 位最核心的人物；“要点”只保留每位学者 2–3 条代表性观点，其余观点可关掉“要点”查看；“文字”控制是否在图上直接显示观点摘要，放大后会出现更多句。"></span>`;
 
   branchWrap.querySelectorAll(".item").forEach(el => el.onclick = () => {
     const id = el.dataset.id;
@@ -1243,10 +1548,22 @@ function buildPills() {
     bp.classList.toggle("selected", state.basics);
     syncHash(); render(); updateAuxButtons();
   };
+  const kp = document.getElementById("keysPill");
+  kp.onclick = () => {
+    state.keys = !state.keys;
+    kp.classList.toggle("selected", state.keys);
+    syncHash(); render(); updateAuxButtons();
+  };
+  const lp = document.getElementById("labelsPill");
+  lp.onclick = () => {
+    state.labels = !state.labels;
+    lp.classList.toggle("selected", state.labels);
+    syncHash(); render(); updateAuxButtons();
+  };
 }
 function updateAuxButtons() {
   const anyOff = state.branches.size !== D.branches.length || state.periods.size !== D.periods.length ||
-                 state.edges.size !== 2 || state.basics || !!qNorm();
+                 state.edges.size !== 2 || state.basics || state.keys || !state.labels || !!qNorm();
   document.getElementById("resetFiltersBtn").hidden = !anyOff;
   document.getElementById("clearFocusBtn").hidden = !state.focus;
 }
@@ -1254,11 +1571,13 @@ function resetFilters() {
   state.branches = new Set(D.branches.map(b => b.id));
   state.periods = new Set(D.periods.map(p => p.id));
   state.edges = new Set(["agree", "disagree"]);
-  state.basics = false; state.q = "";
+  state.basics = false; state.keys = false; state.labels = true; state.q = "";
   document.getElementById("search").value = "";
   document.getElementById("clearSearchBtn").style.display = "none";
   document.querySelectorAll(".branch-item,.period-item,.edge-item").forEach(el => el.classList.add("selected"));
   document.getElementById("basicsPill").classList.remove("selected");
+  document.getElementById("keysPill").classList.remove("selected");
+  document.getElementById("labelsPill").classList.add("selected");
   syncHash(); render(); updateAuxButtons();
 }
 function clearFocus() {
@@ -1385,6 +1704,8 @@ function syncHash() {
   if (state.periods.size !== D.periods.length) parts.push("periods=" + [...state.periods].join(","));
   if (state.edges.size !== 2) parts.push("edges=" + [...state.edges].join(","));
   if (state.basics) parts.push("basics=1");
+  if (state.keys) parts.push("keys=1");
+  if (!state.labels) parts.push("labels=0");
   if (qNorm()) parts.push("q=" + encodeURIComponent(state.q));
   if (state.focus) parts.push("focus=" + state.focus.kind + ":" + state.focus.id);
   const hash = "#" + parts.join("&");
@@ -1412,6 +1733,8 @@ function readHash() {
     document.querySelectorAll(".edge-item").forEach(el => el.classList.toggle("selected", state.edges.has(el.dataset.edge)));
   }
   if (params.get("basics")) { state.basics = true; document.getElementById("basicsPill").classList.add("selected"); }
+  if (params.get("keys")) { state.keys = true; document.getElementById("keysPill").classList.add("selected"); }
+  if (params.get("labels") === "0") { state.labels = false; document.getElementById("labelsPill").classList.remove("selected"); }
   const q = params.get("q");
   if (q) { state.q = q; searchInput.value = q; clearSearchBtn.style.display = "flex"; document.querySelector(".topbar-search-container").classList.add("active"); }
   const f = params.get("focus");
@@ -1442,6 +1765,7 @@ updateAuxButtons();
 /* 调试/集成接口 */
 window.__anthro = {
   state, data: D, meta: META, layout, fitView, setView, openPerson, openSite, render,
-  hits: () => hits, refsOf, bibtexOf, citeText, exportJSON, exportBib, exportCSV
+  hits: () => hits, refsOf, bibtexOf, citeText, exportJSON, exportBib, exportCSV,
+  debug: () => ({ labelCount, labelRects: labelRects.length, cam: cam(), W, H, lastCand: window.__lastCand })
 };
 })();
