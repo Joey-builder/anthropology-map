@@ -148,7 +148,7 @@ function alphaFor(s, fs) {
    稀疏年代被压缩但保底，整体跨度仍等于年份跨度（缩放、取景与 URL 参数逻辑不变）。 */
 const TIME = (() => {
   const samples = [];
-  stmts.forEach(s => samples.push(s.year));
+  stmts.forEach(s => { samples.push(s.year); if (s.key) samples.push(s.year); });   // 要点加权：默认视图只显要点
   people.forEach(p => samples.push(p.born));
   samples.sort((a, b) => a - b);
   const BIN = 5;                                     // 5 年一档数密度
@@ -183,6 +183,30 @@ function xToYear(x) {
 /* ---------------- 布局 ---------------- */
 const layout = { st: null, pt: null, pg: null, medianYear: null };
 
+/* ---------------- 时间轴横向舒展 ---------------- */
+/* 两个时间线视图的纵向都被「行数」（领域 / 人物）卡死、横向却大量留白，
+   于是把映射后的 x 再放大到「内容宽高比 ≈ 可视区宽高比」（上限见 KMAX）：
+   点的横向间距随之拉开，画布也不再中间挤成一团。标尺与取点共用同一个系数。 */
+const KMAX = { st: 1.8, pt: 6 };
+const KT = { st: 1, pt: 1 };
+let timeStretched = false;
+function stretchTimeline() {
+  if (timeStretched) return;
+  timeStretched = true;
+  const band = usableBand(), bh = Math.max(160, band.b - band.t);
+  ["st", "pt"].forEach(v => {
+    const p = VIEW_PAD(v), bw = Math.max(160, W - p.l - p.r);
+    let minX = 1e9, maxX = -1e9;
+    stmts.forEach(s => { const q = v === "st" ? s._st : s._pt;
+      if (q.x < minX) minX = q.x; if (q.x > maxX) maxX = q.x; });
+    const L = v === "st" ? layout.st : layout.pt;
+    const cw = Math.max(1e-6, maxX - minX), ch = Math.max(1e-6, L.maxY - L.minY + 2);
+    KT[v] = Math.max(1, Math.min(KMAX[v], (bw / bh) * (ch / cw)));
+    if (KT[v] !== 1) stmts.forEach(s => { (v === "st" ? s._st : s._pt).x *= KT[v]; });
+  });
+  if (layout.medianYear != null) layout.medianYear = { st: layout.medianYear * KT.st, pt: layout.medianYear * KT.pt };
+}
+
 function buildSentenceLayout() {
   const rows = [];
   let y = 0;
@@ -192,7 +216,7 @@ function buildSentenceLayout() {
     const slotLast = [];
     list.forEach(s => {
       let slot = 0;
-      while (slot < slotLast.length && s.year - slotLast[slot] < MIN_GAP) slot++;
+      while (slot < slotLast.length && yearToX(s.year) - yearToX(slotLast[slot]) < MIN_GAP) slot++;
       if (slot === slotLast.length) slotLast.push(-1e9);
       slotLast[slot] = s.year;
       s._st = { x: yearToX(s.year), y: y + slot * SLOT_GAP };
@@ -205,7 +229,7 @@ function buildSentenceLayout() {
 }
 function buildPeopleLayout() {
   const sorted = [...people].sort((a, b) => (a.born - b.born) || a.name.localeCompare(b.name));
-  const ROW = 3.6, SLOT = 1.05, MIN_GAP = 2.2;
+  const ROW = 3.6, SLOT = 1.5, MIN_GAP = 2.2;
   let y = 0;
   sorted.forEach(p => {
     p._rowY = y;
@@ -213,7 +237,7 @@ function buildPeopleLayout() {
     const slotLast = [];
     list.forEach(s => {
       let slot = 0;
-      while (slot < slotLast.length && s.year - slotLast[slot] < MIN_GAP) slot++;
+      while (slot < slotLast.length && yearToX(s.year) - yearToX(slotLast[slot]) < MIN_GAP) slot++;
       if (slot === slotLast.length) slotLast.push(-1e9);
       slotLast[slot] = s.year;
       s._pt = { x: yearToX(s.year), y: y + (slot % 3) * SLOT };
@@ -330,7 +354,7 @@ function buildMapLayout() {
 function buildLayouts() {
   buildSentenceLayout(); buildPeopleLayout(); buildGraph(); buildMapLayout();
   const yrs = stmts.filter(s => s.key).map(s => s.year).sort((a, b) => a - b);
-  layout.medianYear = yrs.length ? yearToX(yrs[Math.floor(yrs.length / 2)]) : null;   // 文字最密的一段（映射到画布 x）
+  layout.medianYear = yrs.length ? yearToX(yrs[Math.floor(yrs.length / 2)]) : null;   // 文字最密的一段（映射后，stretchTimeline 再乘 K）
 }
 
 /* 视图边距：fitView 用带页边距的一套；applyDefaultZoom 只留顶栏与底部图例实际占用的高度 */
@@ -366,8 +390,8 @@ function applyDefaultZoom(v) {
   c.s = c.fitS * z;
   // 横向：内容比可用区宽时从文字最密的年份看起，否则整段居中
   const wide = bw * c.s > avW;
-  const wantX = (wide && (v === "st" || v === "pt") && layout.medianYear != null)
-    ? layout.medianYear : (b.minX + b.maxX) / 2;
+  const mid = layout.medianYear && layout.medianYear[v];
+  const wantX = (wide && mid != null) ? mid : (b.minX + b.maxX) / 2;
   c.x = wantX - ((p.l + avW / 2) - W / 2) / c.s;
   if (wide) {
     const halfW = W / 2 / c.s;
@@ -675,7 +699,7 @@ function yearTicks(minYear, maxYear) {
   TICK_LEVELS.forEach(level => {
     for (let y = Math.ceil(minYear / level) * level; y <= maxYear; y += level) {
       if (y < TIME.y0 || y > TIME.y1) continue;      // 数据跨度之外不标年份
-      const x = P(yearToX(y), 0)[0];
+      const x = P(yearToX(y) * (KT[state.view] || 1), 0)[0];
       if (x < -40 || x > W + 40) continue;
       if (placed.some(px => Math.abs(px - x) < TICK_MIN_PX)) continue;
       placed.push(x); out.push({ y: y, x: x });
@@ -685,8 +709,9 @@ function yearTicks(minYear, maxYear) {
 }
 function drawYearAxis(col) {
   const c = cam();
-  const minYear = Math.floor(xToYear(c.x - (W / 2) / c.s)) - 6;
-  const maxYear = Math.ceil(xToYear(c.x + (W / 2) / c.s)) + 6;
+  const k = KT[state.view] || 1;
+  const minYear = Math.floor(xToYear((c.x - (W / 2) / c.s) / k)) - 6;
+  const maxYear = Math.ceil(xToYear((c.x + (W / 2) / c.s) / k)) + 6;
   const ticks = yearTicks(minYear, maxYear);
   lastTicks = ticks.map(t => t.y);
   const base = axisBaseY();                        // 标尺线：顶栏下、内容带上方的预留带内
@@ -731,14 +756,14 @@ stmts.forEach(s => {
   const k = s.person.id, cur = firstKeyOf.get(k);
   if (!cur || s.year < cur.year) firstKeyOf.set(k, s);
 });
-function timelinePack(fs) {
+function timelinePack(fs, preRects) {
   const out = new Map();
   const put = (s, x, y, label) => out.set(s, { x, y, label });
   if (!state.labels) {
     stmts.forEach(s => { const p = P(s._st.x, s._st.y); put(s, p[0], p[1]); });
     return out;
   }
-  labelRects = []; labelCount = 0;
+  labelRects = preRects ? preRects.slice() : []; labelCount = 0;
   const lvl = labelLevel();
   const bandYOf = new Map();
   layout.st.rows.forEach(r => bandYOf.set(r.branch.id, P(cam().x, r.center)[1]));
@@ -813,7 +838,14 @@ function timelinePack(fs) {
 }
 
 function renderSentence(col, fs) {
-  const packed = timelinePack(fs);
+  // 领域行标签先算位置：它们占的左侧一列要留给文字避让
+  const rowRects = [];
+  layout.st.rows.forEach(row => {
+    const yc = P(cam().x, row.center)[1];
+    if (yc < 40 || yc > H - 40) return;
+    rowRects.push({ x: 80, y: yc - 15, w: 190, h: 30 });
+  });
+  const packed = timelinePack(fs, rowRects);
   // 领域行标签
   ctx.font = `600 12px ` + FONT;
   layout.st.rows.forEach(row => {
@@ -955,8 +987,8 @@ function renderPeople(col, fs) {
       ctx.save();
       ctx.globalAlpha = isHover ? 1 : a;
       ctx.fillStyle = branchById.get(s.branch).color;
-      ctx.beginPath(); ctx.arc(pos[0], pos[1], isHover ? 5.5 : 3.6, 0, Math.PI * 2); ctx.fill();
-      if (isHover) { ctx.strokeStyle = col.ink; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(pos[0], pos[1], 8.5, 0, Math.PI * 2); ctx.stroke(); }
+      ctx.beginPath(); ctx.arc(pos[0], pos[1], isHover ? 5.2 : 2.7, 0, Math.PI * 2); ctx.fill();
+      if (isHover) { ctx.strokeStyle = col.ink; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(pos[0], pos[1], 8, 0, Math.PI * 2); ctx.stroke(); }
       ctx.restore();
       hits.push({ x: pos[0], y: pos[1], kind: "stmt", item: s });
     });
@@ -1993,6 +2025,7 @@ buildLayouts();
 readHash();
 window.addEventListener("resize", resize);
 resize();
+stretchTimeline();
 fitView();
 applyDefaultZoom(state.view);
 updateAuxButtons();
