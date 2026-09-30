@@ -143,6 +143,43 @@ function alphaFor(s, fs) {
   return a;
 }
 
+/* ---------------- 时间刻度：按内容密度自适应 ---------------- */
+/* 年份 → 画布 x 的非线性映射（密度均衡）：观点与生年密集的年代占更宽的横向空间，
+   稀疏年代被压缩但保底，整体跨度仍等于年份跨度（缩放、取景与 URL 参数逻辑不变）。 */
+const TIME = (() => {
+  const samples = [];
+  stmts.forEach(s => samples.push(s.year));
+  people.forEach(p => samples.push(p.born));
+  samples.sort((a, b) => a - b);
+  const BIN = 5;                                     // 5 年一档数密度
+  const y0 = Math.floor(samples[0] / 10) * 10 - 10;
+  const y1 = Math.ceil(samples[samples.length - 1] / 10) * 10 + 10;
+  const n = Math.round((y1 - y0) / BIN);
+  const raw = new Array(n).fill(0);
+  samples.forEach(y => { raw[Math.min(n - 1, Math.max(0, Math.floor((y - y0) / BIN)))]++; });
+  const C = 2;                                       // 每档保底权重：空年代也不会被压成一条线
+  const w = raw.map((c, i) => (raw[Math.max(0, i - 1)] + 2 * c + raw[Math.min(n - 1, i + 1)]) / 4 + C);
+  let tot = 0; w.forEach(v => tot += v);
+  const scale = (y1 - y0) / tot;
+  const xs = [y0];
+  w.forEach(v => xs.push(xs[xs.length - 1] + v * scale));
+  return { y0: y0, y1: y1, BIN: BIN, xs: xs };
+})();
+function yearToX(y) {
+  const t = (y - TIME.y0) / TIME.BIN, i = Math.floor(t), last = TIME.xs.length - 1;
+  if (i < 0) return TIME.y0 + (y - TIME.y0);
+  if (i >= last) return TIME.xs[last] + (y - TIME.y1);
+  return TIME.xs[i] + (TIME.xs[i + 1] - TIME.xs[i]) * (t - i);
+}
+function xToYear(x) {
+  const xs = TIME.xs, last = xs.length - 1;
+  if (x <= xs[0]) return TIME.y0 + (x - xs[0]);
+  if (x >= xs[last]) return TIME.y1 + (x - xs[last]);
+  let lo = 0, hi = last;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (xs[mid] <= x) lo = mid; else hi = mid; }
+  return TIME.y0 + (lo + (x - xs[lo]) / (xs[lo + 1] - xs[lo])) * TIME.BIN;
+}
+
 /* ---------------- 布局 ---------------- */
 const layout = { st: null, pt: null, pg: null, medianYear: null };
 
@@ -158,7 +195,7 @@ function buildSentenceLayout() {
       while (slot < slotLast.length && s.year - slotLast[slot] < MIN_GAP) slot++;
       if (slot === slotLast.length) slotLast.push(-1e9);
       slotLast[slot] = s.year;
-      s._st = { x: s.year, y: y + slot * SLOT_GAP };
+      s._st = { x: yearToX(s.year), y: y + slot * SLOT_GAP };
     });
     const bandH = Math.max(slotLast.length, 1) * SLOT_GAP;
     rows.push({ branch: b, top: y, height: bandH, center: y + bandH / 2 });
@@ -179,7 +216,7 @@ function buildPeopleLayout() {
       while (slot < slotLast.length && s.year - slotLast[slot] < MIN_GAP) slot++;
       if (slot === slotLast.length) slotLast.push(-1e9);
       slotLast[slot] = s.year;
-      s._pt = { x: s.year, y: y + (slot % 3) * SLOT };
+      s._pt = { x: yearToX(s.year), y: y + (slot % 3) * SLOT };
     });
     y += ROW;
   });
@@ -248,8 +285,9 @@ function buildMapLayout() {
       return pts;
     };
     const addRing = pts => {
-      path.moveTo(mapX(pts[0][0]), mapY(pts[0][1]));
-      for (let i = 1; i < pts.length; i++) path.lineTo(mapX(pts[i][0]), mapY(pts[i][1]));
+      const p0 = mapPt(pts[0][0], pts[0][1]);
+      path.moveTo(p0[0], p0[1]);
+      for (let i = 1; i < pts.length; i++) { const q = mapPt(pts[i][0], pts[i][1]); path.lineTo(q[0], q[1]); }
       path.closePath();
     };
     topo.objects.countries.geometries.forEach(g => {
@@ -257,6 +295,14 @@ function buildMapLayout() {
       polys.forEach(poly => poly.forEach(ri => addRing(ringOf(ri))));
     });
   }
+  /* 海洋底色：投影边界（经度 ±180 的上下边界连成闭合轮廓） */
+  const outline = new Path2D();
+  for (let lat = -90; lat <= 90; lat += 2) {
+    const q = mapPt(180, lat);
+    if (lat === -90) outline.moveTo(q[0], q[1]); else outline.lineTo(q[0], q[1]);
+  }
+  for (let lat = 90; lat >= -90; lat -= 2) { const q = mapPt(-180, lat); outline.lineTo(q[0], q[1]); }
+  outline.closePath();
   const siteMap = new Map();
   people.forEach(p => (p.sites || []).forEach(site => {
     const key = site.name + "|" + Math.round(site.lon) + "|" + Math.round(site.lat);
@@ -277,27 +323,30 @@ function buildMapLayout() {
     h.persons.push(p);
   });
   layout.mp = {
-    path, sites: [...siteMap.values()], homes: [...homeMap.values()],
-    bounds: { minX: mapX(-180), maxX: mapX(180), minY: mapY(80), maxY: mapY(-58) }
+    path, outline, sites: [...siteMap.values()], homes: [...homeMap.values()],
+    bounds: { minX: mapX(-180), maxX: mapX(180), minY: mapY(90), maxY: mapY(-90) }
   };
 }
 function buildLayouts() {
   buildSentenceLayout(); buildPeopleLayout(); buildGraph(); buildMapLayout();
   const yrs = stmts.filter(s => s.key).map(s => s.year).sort((a, b) => a - b);
-  layout.medianYear = yrs.length ? yrs[Math.floor(yrs.length / 2)] : null;   // 文字最密的一段
+  layout.medianYear = yrs.length ? yearToX(yrs[Math.floor(yrs.length / 2)]) : null;   // 文字最密的一段（映射到画布 x）
 }
 
 /* 视图边距：fitView 用带页边距的一套；applyDefaultZoom 只留顶栏与底部图例实际占用的高度 */
 const VIEW_PAD = v => v === "pg" ? { l: 100, r: 100, t: 96, b: 252 }
                    : v === "mp" ? { l: 120, r: 120, t: 100, b: 252 }
-                   : v === "st" ? { l: 200, r: 80, t: 96, b: 252 }
-                   : { l: 220, r: 80, t: 96, b: 252 };
+                   : v === "st" ? { l: 200, r: 80, t: 96 + AXIS_H, b: 252 }
+                   : { l: 220, r: 80, t: 96 + AXIS_H, b: 252 };
 const VIEW_TOP = 118, VIEW_BOTTOM = 150;
 
 /* 顶栏与底部图例实际占用的高度：直接量 DOM，比写死数字稳（药丸换行或按钮出现时会变） */
+const AXIS_H = 22;                     // 年份标尺占用的高度（st / pt 顶部）
+const hasYearAxis = () => state.view === "st" || state.view === "pt";
+const axisBaseY = () => usableBand().t - 6;            // 标尺线的 y（在内容带上方那条预留带里）
 function usableBand() {
   const bar = document.getElementById("topControlBar"), hd = document.getElementById("header");
-  const t = (bar ? bar.getBoundingClientRect().bottom : VIEW_TOP) + 10;
+  const t = (bar ? bar.getBoundingClientRect().bottom : VIEW_TOP) + 10 + (hasYearAxis() ? AXIS_H : 0);
   const b = (hd ? hd.getBoundingClientRect().top : H - VIEW_BOTTOM) - 10;
   return { t: Math.max(0, t), b: Math.max(t + 120, b) };
 }
@@ -457,7 +506,7 @@ function drawStatementLabel(c, col) {
       const x = k === 0 ? c.p[0] + 9 : c.p[0] - 9 - totalW;
       const yBase = c.p[1] + dy;                      // 文字基线
       if (x < 6 || x + totalW > W - 6) continue;
-      if (yBase < 88 || yBase > H - 104) continue;
+      if (yBase < contentTop || yBase > H - 104) continue;
       if (yBase > H - 186 && x + totalW < 760) continue;   // 左下角留给标题与图例
       if (!reserveRect(x, yBase - 11, totalW, h)) continue;
       ctx.save();
@@ -588,6 +637,7 @@ function buildBackground() {
 
 /* ---------------- 渲染 ---------------- */
 let hits = [];
+let contentTop = 88;          // 正文文字的上边界（时间线视图里让开顶部年份标尺）
 let hover = null;   // {kind,x,y,item}
 let hoverPerson = null;
 
@@ -595,6 +645,7 @@ function render() {
   if (!layout.st) return;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   const col = C();
+  contentTop = hasYearAxis() ? usableBand().t + 4 : 88;
   ctx.clearRect(0, 0, W, H);
   if (!bgCanvas || bgW !== W || bgH !== H || bgDPR !== DPR || bgDark !== state.dark) buildBackground();
   ctx.drawImage(bgCanvas, 0, 0, W, H);
@@ -613,27 +664,46 @@ function render() {
   updateViewHint();
 }
 
+/* 年份标尺：刻度间隔随局部密度自适应——
+   密集的年代每 10 年（甚至 5 年）一根刻度；稀疏的年代退到 50/100 年一根。
+   先放粗刻度（百年），再让细刻度补空，任何两根刻度都至少隔开 TICK_MIN_PX。
+   标尺画在顶栏正下方：底部那条被图例与统计文字压住的旧轴不再使用。 */
+const TICK_LEVELS = [100, 50, 25, 10, 5], TICK_MIN_PX = 74;
+let lastTicks = [];
+function yearTicks(minYear, maxYear) {
+  const out = [], placed = [];
+  TICK_LEVELS.forEach(level => {
+    for (let y = Math.ceil(minYear / level) * level; y <= maxYear; y += level) {
+      if (y < TIME.y0 || y > TIME.y1) continue;      // 数据跨度之外不标年份
+      const x = P(yearToX(y), 0)[0];
+      if (x < -40 || x > W + 40) continue;
+      if (placed.some(px => Math.abs(px - x) < TICK_MIN_PX)) continue;
+      placed.push(x); out.push({ y: y, x: x });
+    }
+  });
+  return out.sort((a, b) => a.x - b.x);
+}
 function drawYearAxis(col) {
   const c = cam();
-  const minYear = Math.floor((c.x - (W / 2) / c.s) / 10) * 10;
-  const maxYear = Math.ceil((c.x + (W / 2) / c.s) / 10) * 10;
-  const steps = [5, 10, 20, 25, 50, 100];
-  let step = steps.find(st => st * c.s >= 74) || 100;
+  const minYear = Math.floor(xToYear(c.x - (W / 2) / c.s)) - 6;
+  const maxYear = Math.ceil(xToYear(c.x + (W / 2) / c.s)) + 6;
+  const ticks = yearTicks(minYear, maxYear);
+  lastTicks = ticks.map(t => t.y);
+  const base = axisBaseY();                        // 标尺线：顶栏下、内容带上方的预留带内
   ctx.save();
   ctx.strokeStyle = col.grid; ctx.lineWidth = 1;
   ctx.beginPath();
-  for (let y = minYear; y <= maxYear; y += step) {
-    const x = P(y, 0)[0];
-    ctx.moveTo(x, 0); ctx.lineTo(x, H - 34);
-  }
+  ticks.forEach(t => { ctx.moveTo(t.x, base); ctx.lineTo(t.x, H - 34); });
+  ctx.moveTo(0, base); ctx.lineTo(W, base);
   ctx.stroke();
-  ctx.fillStyle = col.sub; ctx.font = `11px ${FONT}`; ctx.textAlign = "center";
-  for (let y = minYear; y <= maxYear; y += step) {
-    const x = P(y, 0)[0];
-    ctx.fillText(String(y), x, H - 40);
-  }
-  ctx.strokeStyle = col.grid;
-  ctx.beginPath(); ctx.moveTo(0, H - 34); ctx.lineTo(W, H - 34); ctx.stroke();
+  ctx.font = `11px ${FONT}`; ctx.textAlign = "center";
+  ticks.forEach(t => {
+    const label = String(t.y), w = ctx.measureText(label).width;
+    ctx.fillStyle = col.plate;                                   // 底片：年份读得清
+    ctx.fillRect(t.x - w / 2 - 3, base - 16, w + 6, 14);
+  });
+  ctx.fillStyle = col.sub;
+  ticks.forEach(t => ctx.fillText(String(t.y), t.x, base - 5));
   ctx.restore();
 }
 
@@ -722,7 +792,7 @@ function timelinePack(fs) {
         const off = r === 0 ? 0 : (r % 2 ? -1 : 1) * Math.ceil(r / 2) * LINE;
         const x0 = rev ? x - 4 : x, x1 = rev ? dotX : x + totalW;
         const yBase = c.p[1] + off;                    // 紧贴自己的圆点，仅在碰撞时上下挪
-        if (yBase < 88 || yBase > H - 104) continue;   // 避开顶栏与底部统计
+        if (yBase < contentTop || yBase > H - 104) continue;   // 避开顶部标尺与底部统计
         if (yBase > H - 186 && x1 < 760) continue;     // 左下角留给标题与筛选图例
         if (rows[r].some(iv => !(x0 > iv[1] + 14 || x1 < iv[0] - 14))) continue;
         if (!reserveRect(x - 6, yBase - 12, totalW + 8, h + 2)) continue;
@@ -743,7 +813,6 @@ function timelinePack(fs) {
 }
 
 function renderSentence(col, fs) {
-  drawYearAxis(col);
   const packed = timelinePack(fs);
   // 领域行标签
   ctx.font = `600 12px ` + FONT;
@@ -834,10 +903,10 @@ function renderSentence(col, fs) {
       hits.push({ x: q.x, y: q.y, kind: "stmt", item: st });
     }
   });
+  drawYearAxis(col);
 }
 
 function renderPeople(col, fs) {
-  drawYearAxis(col);
   const preRects = [];
   const L = layout.pt;
   const anchor = new Map();
@@ -848,7 +917,7 @@ function renderPeople(col, fs) {
       if (!first || s.year < first.year) first = s;
       ys.push(s._pt.y);
     });
-    if (first) anchor.set(p.id, { x: first.year, y: ys.reduce((m, v) => m + v, 0) / ys.length });
+    if (first) anchor.set(p.id, { x: first._pt.x, y: ys.reduce((m, v) => m + v, 0) / ys.length });
   });
   // 人物关系线
   pEdges.forEach(pe => {
@@ -874,7 +943,7 @@ function renderPeople(col, fs) {
   let lastNamedY = -1e9;
   L.order.forEach(p => {
     const rowY = P(cam().x, p._rowY)[1];
-    if (rowY < 30 || rowY > H - 44) return;
+    if (rowY < contentTop - 24 || rowY > H - 44) return;
     let minX = 1e9, n = 0;
     p.stmtList.forEach(s => {
       const a = alphaFor(s, fs);
@@ -915,6 +984,7 @@ function renderPeople(col, fs) {
   });
   // 观点文字
   drawLabels(col, fs, s => P(s._pt.x, s._pt.y), null, false, preRects);
+  drawYearAxis(col);
 }
 
 function renderGraph(col, fs) {
@@ -985,19 +1055,34 @@ function renderGraph(col, fs) {
 
 const personActive = p => p.stmtList.some(stmtActive);
 
-/* 墨卡托投影：经度 → x，纬度 → y（屏幕坐标，向北为负） */
+/* 世界底图投影：Equal Earth（等面积伪圆柱，Šavrič 等 2018）。
+   比墨卡托好在：两极不被拉长，全世界（含南极）一次就能完整装进宽屏，横向也更饱满。
+   经度 → x 与纬度 → y 不再各自独立，统一用 mapPt(lon, lat) 取点（y 向下为正）。 */
 const DEG = Math.PI / 180;
-const mapX = lon => lon * DEG;
-const mapY = lat => -Math.log(Math.tan(Math.PI / 4 + Math.max(-60, Math.min(80, lat)) * DEG / 2));
+const EE = { A1: 1.340264, A2: -0.081106, A3: 0.000893, A4: 0.003796, M: Math.sqrt(3) / 2 };
+function mapPt(lon, lat) {
+  const theta = Math.asin(EE.M * Math.sin(Math.max(-90, Math.min(90, lat)) * DEG));
+  const t2 = theta * theta, t6 = t2 * t2 * t2, t8 = t6 * t2;
+  const denom = 3 * (9 * EE.A4 * t8 + 7 * EE.A3 * t6 + 3 * EE.A2 * t2 + EE.A1);
+  const x = 2 * Math.sqrt(3) * lon * DEG * Math.cos(theta) / denom;
+  const y = theta * (EE.A1 + EE.A2 * t2 + t6 * (EE.A3 + EE.A4 * t2));
+  return [x, -y];
+}
+const mapX = lon => mapPt(lon, 0)[0];
+const mapY = lat => mapPt(0, lat)[1];
+const mapScreen = (lon, lat) => { const q = mapPt(lon, lat); return P(q[0], q[1]); };
 
 function renderMap(col, fs) {
   const M = layout.mp, c = cam();
   /* 陆地底图（世界坐标为 经度 / -纬度） */
   ctx.save();
   ctx.translate(W / 2, H / 2); ctx.scale(c.s, c.s); ctx.translate(-c.x, -c.y);
-  ctx.fillStyle = state.dark ? "#17181a" : "#f4f5f7";
-  ctx.strokeStyle = state.dark ? "#2b2d31" : "#e2e4e8";
-  ctx.lineWidth = 0.7 / c.s;
+  ctx.fillStyle = state.dark ? "#131920" : "#e6eef4";          // 海洋
+  ctx.strokeStyle = state.dark ? "#26313b" : "#d2dfe9";
+  ctx.lineWidth = 0.8 / c.s;
+  ctx.fill(M.outline); ctx.stroke(M.outline);
+  ctx.fillStyle = state.dark ? "#1c1f24" : "#ecdfc7";          // 陆地
+  ctx.strokeStyle = state.dark ? "#343a42" : "#d3c39f";
   ctx.fill(M.path); ctx.stroke(M.path);
   ctx.restore();
 
@@ -1007,13 +1092,13 @@ function renderMap(col, fs) {
   people.forEach(p => {
     if (!p.home || !p.sites.length) return;
     const on = activeP(p);
-    const p1 = P(mapX(p.home[0]), mapY(p.home[1]));
+    const p1 = mapScreen(p.home[0], p.home[1]);
     const colr = branchById.get(p.branches[0]).color;
     p.sites.forEach(site => {
       const hotArc = hover && hover.kind === "arc" && hover.item === p && hover.site === site.name;
       const hotSite = hover && hover.kind === "site" && hover.item.name === site.name;
       if (!on && !hotArc) return;
-      const p2 = P(mapX(site.lon), mapY(site.lat));
+      const p2 = mapScreen(site.lon, site.lat);
       const mx = (p1[0] + p2[0]) / 2, my = (p1[1] + p2[1]) / 2;
       const bend = -(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) * 0.18 + 10);
       ctx.save();
@@ -1033,7 +1118,7 @@ function renderMap(col, fs) {
   const ranked = M.sites.map(site => ({ site, act: site.persons.filter(activeP) }))
                         .sort((a, b) => b.act.length - a.act.length);
   ranked.forEach(({ site, act }) => {
-    const p = P(mapX(site.lon), mapY(site.lat));
+    const p = mapScreen(site.lon, site.lat);
     const n = act.length;
     const hot = hover && hover.kind === "site" && hover.item === site;
     const r = 3.2 + 1.7 * Math.sqrt(n) + (hot ? 2 : 0);
@@ -1050,7 +1135,7 @@ function renderMap(col, fs) {
   /* 机构城市（空心圆） */
   const homeRank = M.homes.map(h => ({ h, act: h.persons.filter(activeP) })).sort((a, b) => b.act.length - a.act.length);
   homeRank.forEach(({ h, act }) => {
-    const p = P(mapX(h.lon), mapY(h.lat));
+    const p = mapScreen(h.lon, h.lat);
     const hot = hover && hover.kind === "home" && hover.item === h;
     const r = 2.4 + 0.7 * Math.sqrt(act.length) + (hot ? 1.6 : 0);
     ctx.save();
@@ -1069,7 +1154,7 @@ function renderMap(col, fs) {
   ranked.forEach(({ site, act }) => {
     const hot = hover && hover.kind === "site" && hover.item === site;
     if (act.length < 1 && !hot) return;
-    const p = P(mapX(site.lon), mapY(site.lat));
+    const p = mapScreen(site.lon, site.lat);
     const name = site.name.length > 14 ? site.name.slice(0, 13) + "…" : site.name;
     const w = ctx.measureText(name).width;
     const rect = { x: p[0] - w / 2 - 4, y: p[1] + 7, w: w + 8, h: 14 };
@@ -1087,7 +1172,7 @@ function renderMap(col, fs) {
   homeRank.forEach(({ h, act }) => {
     const hot = hover && hover.kind === "home" && hover.item === h;
     if (act.length < 3 && !hot) return;
-    const p = P(mapX(h.lon), mapY(h.lat));
+    const p = mapScreen(h.lon, h.lat);
     const name = h.name + " · " + act.length;
     const w = ctx.measureText(name).width;
     const rect = { x: p[0] - w / 2 - 4, y: p[1] - 20, w: w + 8, h: 14 };
@@ -1916,6 +2001,6 @@ updateAuxButtons();
 window.__anthro = {
   state, data: D, meta: META, layout, fitView, setView, openPerson, openSite, render,
   hits: () => hits, refsOf, bibtexOf, citeText, exportJSON, exportBib, exportCSV,
-  debug: () => ({ labelCount, labelRects: labelRects.length, cam: cam(), W, H, lastCand: window.__lastCand })
+  debug: () => ({ labelCount, labelRects: labelRects.length, cam: cam(), W, H, lastCand: window.__lastCand, ticks: lastTicks, time: TIME })
 };
 })();
